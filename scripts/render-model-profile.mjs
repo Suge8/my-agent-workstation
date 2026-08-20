@@ -66,21 +66,18 @@ export function renderModelProfile({
     if (!profile.models[alias]) throw new Error(`未知模型别名：${alias}`);
   }
 
-  const resolved = new Map();
+  const choices = new Map();
   for (const [alias, source] of Object.entries(profile.models)) {
     const chosen = Object.hasOwn(selections.models ?? {}, alias)
       ? selections.models[alias]
       : `${source.provider}/${source.model}`;
-    if (chosen === null) {
-      resolved.set(alias, null);
-      continue;
-    }
-    resolved.set(alias, acceptModel(modelRef(chosen, `模型选择 ${alias}`)));
+    choices.set(alias, chosen === null ? null : modelRef(chosen, `模型选择 ${alias}`));
   }
 
   const resolveAlias = (alias) => {
-    if (!resolved.has(alias)) throw new Error(`模型档案引用未知别名：${alias}`);
-    return resolved.get(alias);
+    if (!choices.has(alias)) throw new Error(`模型档案引用未知别名：${alias}`);
+    const model = choices.get(alias);
+    return model && acceptModel(model);
   };
   const selectedDefault = selections.default
     ? modelRef(selections.default, "默认模型")
@@ -93,6 +90,7 @@ export function renderModelProfile({
     ...object(piSettings, "Pi settings"),
     defaultProvider: selectedDefault.provider,
     defaultModel: selectedDefault.model,
+    defaultThinkingLevel: "medium",
     enabledModels: cycle.map((item) => item.ref),
     warnings: {
       ...object(piSettings.warnings ?? {}, "Pi settings warnings"),
@@ -108,21 +106,23 @@ export function renderModelProfile({
   const features = { ...object(currentFirecode.features ?? {}, "FireCode features") };
   const currentPresets = object(currentFirecode.presets ?? {}, "FireCode presets");
   const managedPresets = new Set(Object.keys(profile.presets));
-  const presets = {};
+  const customPresets = {};
   for (const [name, preset] of Object.entries(currentPresets)) {
-    if (managedPresets.has(name)) continue;
-    const custom = object(preset, `FireCode preset ${name}`);
-    if (typeof custom.provider === "string" && typeof custom.model === "string") {
-      acceptModel(modelRef(`${custom.provider}/${custom.model}`, `FireCode preset ${name}`));
-    }
-    presets[name] = custom;
+    if (!managedPresets.has(name)) customPresets[name] = object(preset, `FireCode preset ${name}`);
   }
+  const presets = {};
   if (!disabled.has("presets")) {
+    for (const [name, custom] of Object.entries(customPresets)) {
+      if (typeof custom.provider === "string" && typeof custom.model === "string") {
+        acceptModel(modelRef(`${custom.provider}/${custom.model}`, `FireCode preset ${name}`));
+      }
+    }
     for (const [name, preset] of Object.entries(profile.presets)) {
       const model = resolveAlias(preset.model);
       if (model) presets[name] = { ...preset, provider: model.provider, model: model.model };
     }
   }
+  Object.assign(presets, customPresets);
   features.presets = !disabled.has("presets") && Object.keys(presets).length > 0;
 
   const masterModels = disabled.has("master")

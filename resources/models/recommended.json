@@ -1,54 +1,66 @@
 {
   "version": 1,
   "models": {
-    "sol": {
-      "provider": "openai-codex",
-      "model": "gpt-5.6-sol"
-    },
-    "luna": {
-      "provider": "openai-codex",
-      "model": "gpt-5.6-luna"
-    },
-    "opus": {
-      "provider": "anthropic",
-      "model": "claude-opus-5"
-    },
-    "sonnet": {
-      "provider": "anthropic",
-      "model": "claude-sonnet-5"
-    },
-    "kimi": {
-      "provider": "kimi-coding",
-      "model": "k3-256k"
-    }
+    "sol": { "provider": "openai-codex", "model": "gpt-5.6-sol" },
+    "terra": { "provider": "openai-codex", "model": "gpt-5.6-terra" },
+    "luna": { "provider": "openai-codex", "model": "gpt-5.6-luna" },
+    "mini": { "provider": "openai-codex", "model": "gpt-5.4-mini" },
+    "spark": { "provider": "openai-codex", "model": "gpt-5.3-codex-spark" },
+    "fable": { "provider": "anthropic", "model": "claude-fable-5" },
+    "sonnet": { "provider": "anthropic", "model": "claude-sonnet-5" },
+    "opus5": { "provider": "anthropic", "model": "claude-opus-5" },
+    "opus46": { "provider": "anthropic", "model": "claude-opus-4-6" },
+    "xai": { "provider": "xai", "model": "grok-4.6" },
+    "ds-flash": { "provider": "deepseek", "model": "deepseek-v4-flash" },
+    "ds-pro": { "provider": "deepseek", "model": "deepseek-v4-pro" },
+    "k3": { "provider": "kimi-coding", "model": "k3" },
+    "k3-256": { "provider": "kimi-coding", "model": "k3-256k" },
+    "gemini": { "provider": "antigravity", "model": "gemini-3.7-flash" },
+    "firecode-default": { "provider": "openai", "model": "gpt-4.1" }
   },
   "default": "sol",
-  "cycle": ["sol", "luna", "sonnet", "opus", "kimi"],
+  "cycle": [
+    "sol",
+    "terra",
+    "luna",
+    "mini",
+    "spark",
+    "fable",
+    "sonnet",
+    "opus5",
+    "opus46",
+    "xai",
+    "ds-flash",
+    "ds-pro",
+    "k3",
+    "k3-256",
+    "gemini"
+  ],
   "presets": {
-    "sol": { "model": "sol", "thinkingLevel": "medium", "key": "alt+1" },
-    "luna": { "model": "luna", "thinkingLevel": "xhigh", "key": "alt+2" },
-    "sonnet": { "model": "sonnet", "thinkingLevel": "medium", "key": "alt+3" },
-    "opus": { "model": "opus", "thinkingLevel": "medium", "key": "alt+4" },
-    "kimi": { "model": "kimi", "thinkingLevel": "high", "key": "alt+5" }
+    "fable": { "model": "fable", "thinkingLevel": "medium", "key": "alt+1" },
+    "opus5": { "model": "opus5", "thinkingLevel": "medium", "key": "alt+2" },
+    "sol": { "model": "sol", "thinkingLevel": "medium", "key": "alt+3" },
+    "gemini": { "model": "gemini", "thinkingLevel": "high", "key": "alt+4" },
+    "ds": { "model": "ds-flash", "thinkingLevel": "high", "key": "alt+5" },
+    "k3-256": { "model": "k3-256", "thinkingLevel": "high", "key": "alt+6" },
+    "xai": { "model": "xai", "thinkingLevel": "high", "key": "alt+7" }
   },
   "master": [
-    { "model": "sol", "thinking": "medium", "use": "调研与实现、调试" },
-    { "model": "luna", "thinking": "xhigh", "use": "大规模并行快任务" },
-    { "model": "opus", "thinking": "medium", "use": "前端与综合架构" },
-    { "model": "kimi", "thinking": "high", "use": "视觉设计" }
+    { "model": "firecode-default", "thinking": "medium", "use": "通用实现与调试" }
   ],
   "review": {
-    "advisor": { "model": "opus", "thinking": "high" },
+    "advisor": { "model": "firecode-default", "thinking": "high" },
     "reviewers": [
-      { "model": "sonnet", "thinking": "medium" },
-      { "model": "opus", "thinking": "medium" },
-      { "model": "sol", "thinking": "medium" }
+      { "model": "firecode-default", "thinking": "high" }
     ]
   },
   "keybindings": {
-    "app.thinking.cycle": "tab",
     "app.model.cycleForward": "shift+tab",
-    "app.session.rename": ["ctrl+r", "alt+r"]
+    "app.thinking.cycle": "tab",
+    "tui.input.tab": [],
+    "tui.editor.cursorWordRight": ["alt+right", "ctrl+right"],
+    "tui.editor.cursorRight": "right",
+    "app.session.rename": "alt+r"
   },
   "firecodeKeys": {
     "rename": "ctrl+r",
