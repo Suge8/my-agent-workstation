@@ -420,6 +420,28 @@ describe("review config strictness", () => {
 		expect(problems).toContain("review.tools 必须是字符串数组");
 	});
 
+	test("empty required collections and nested command are rejected", async () => {
+		const { parseReviewConfig } = (await loadFirecodeModule("config.js")) as {
+			parseReviewConfig: (raw: Record<string, unknown>, problems: string[]) => unknown;
+		};
+		const problems: string[] = [];
+		parseReviewConfig(
+			{
+				advisor: { model: "p/a", thinking: "max" },
+				reviewers: [{ model: "p/r", thinking: "high" }],
+				maxRounds: 5,
+				advisorAfterFailures: 2,
+				timeoutMinutes: 20,
+				tools: [],
+				background: {},
+				language: "zh",
+			},
+			problems,
+		);
+		expect(problems).toContain("review.tools 必须是非空字符串数组");
+		expect(problems).toContain("review.background.command 必须是非空字符串");
+	});
+
 	test("a fully valid review section reports no problems", async () => {
 		const { parseReviewConfig } = (await loadFirecodeModule("config.js")) as {
 			parseReviewConfig: (raw: Record<string, unknown>, problems: string[]) => unknown;
@@ -454,11 +476,19 @@ describe("review section top-level type", () => {
 		}
 	});
 
-	test("an object review section produces no top-level problem", async () => {
+	test("an incomplete review object reports every missing explicit field", async () => {
 		const module = (await loadFirecodeModule("config.js", {
 			configJsonc: `{ "review": { "maxRounds": 3 } }`,
 		})) as { loadConfig: () => { problems: string[] } };
-		expect(module.loadConfig().problems.filter((item) => item.startsWith("review"))).toEqual([]);
+		expect(module.loadConfig().problems.filter((item) => item.startsWith("review"))).toEqual([
+			"review.advisor 必须显式配置",
+			"review.reviewers 必须显式配置",
+			"review.advisorAfterFailures 必须显式配置",
+			"review.timeoutMinutes 必须显式配置",
+			"review.tools 必须显式配置",
+			"review.background 必须显式配置",
+			"review.language 必须显式配置",
+		]);
 	});
 });
 

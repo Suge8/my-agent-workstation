@@ -55,15 +55,20 @@ async function register(socketPath: string, env: Record<string, string | undefin
 	const handlers = new Map<string, Handler>();
 	const previous = { ...process.env };
 	cleanups.push(async () => {
-		process.env = previous;
+		for (const key of Object.keys(process.env))
+			if (!(key in previous)) delete process.env[key];
+		Object.assign(process.env, previous);
 	});
-	Object.assign(process.env, {
+	for (const [key, value] of Object.entries({
 		HERDR_ENV: "1",
 		HERDR_PANE_ID: "w1:pA",
 		HERDR_SOCKET_PATH: socketPath,
 		FIRECODE_MASTER_WORKER: undefined,
 		...env,
-	});
+	})) {
+		if (value === undefined) delete process.env[key];
+		else process.env[key] = value;
+	}
 	(await load()).registerHerdrDisplay({
 		on(name: string, handler: Handler) {
 			handlers.set(name, handler);

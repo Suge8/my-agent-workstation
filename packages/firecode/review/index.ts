@@ -240,6 +240,8 @@ function loadReviewConfig(): { config: ReviewConfig } | { error: string } {
 	);
 	if (problems.length > 0)
 		return { error: `fire-review 配置有问题，已停止：${problems.join("；")}` };
+	if (!loaded.config.review.advisor.model || loaded.config.review.reviewers.length === 0)
+		return { error: "fire-review 配置有问题，已停止：请显式完整配置 review" };
 	return { config: loaded.config.review };
 }
 

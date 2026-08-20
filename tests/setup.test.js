@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -60,10 +60,11 @@ case "$name" in
   pi)
     case "$*" in
       "--version") has pi_version || exit 1; value pi_version ;;
-      "list") has antigravity && printf 'npm:pi-antigravity\\n'; exit 0 ;;
+      "list") has antigravity && printf 'npm:pi-antigravity\\n'; has independent_firecode && printf '/tmp/pi-firecode\\n'; exit 0 ;;
       "install npm:pi-antigravity") log "$@"; touch "$state/antigravity" ;;
       "update npm:pi-antigravity") log "$@" ;;
       install\\ *) log "$@"; touch "$state/workstation_package" ;;
+      "remove /tmp/pi-firecode") log "$@"; rm -f "$state/independent_firecode" ;;
       remove\\ *) log "$@"; rm -f "$state/workstation_package" ;;
       "auth check --provider "*" --json --no-refresh")
         provider=\${4}
@@ -71,7 +72,12 @@ case "$name" in
         ;;
       "--list-models"|"--no-extensions --list-models")
         printf 'provider model context max-out thinking images\\n'
-        if has auth-openai-codex; then printf 'openai-codex gpt-5.6-sol 1M 128K yes yes\\n'; fi
+        if has auth-openai-codex; then printf 'openai-codex gpt-5.6-sol 1M 128K yes yes\\nopenai-codex gpt-5.6-terra 1M 128K yes yes\\nopenai-codex gpt-5.6-luna 1M 128K yes yes\\nopenai-codex gpt-5.4-mini 1M 128K yes yes\\nopenai-codex gpt-5.3-codex-spark 1M 128K yes yes\\n'; fi
+        if has auth-anthropic; then printf 'anthropic claude-fable-5 1M 128K yes yes\\nanthropic claude-sonnet-5 1M 128K yes yes\\nanthropic claude-opus-5 1M 128K yes yes\\nanthropic claude-opus-4-6 1M 128K yes yes\\n'; fi
+        if has auth-xai; then printf 'xai grok-4.6 1M 128K yes yes\\n'; fi
+        if has auth-deepseek; then printf 'deepseek deepseek-v4-flash 1M 128K yes yes\\ndeepseek deepseek-v4-pro 1M 128K yes yes\\n'; fi
+        if has auth-kimi-coding; then printf 'kimi-coding k3 1M 128K yes yes\\nkimi-coding k3-256k 1M 128K yes yes\\n'; fi
+        if has auth-antigravity; then printf 'antigravity gemini-3.7-flash 1M 128K yes yes\\n'; fi
         ;;
       *) exit 1 ;;
     esac
@@ -189,8 +195,9 @@ esac
     FAKE_STATE: fakeState, FAKE_LOG: log, FAKE_COMMAND: dispatcher, REAL_NODE: process.execPath,
     BREW_PREFIX: brewPrefix, SHELL: join(bin, "zsh"), XDG_CONFIG_HOME: join(home, ".config"),
   };
-  const run = (args, input) => spawnSync(setup, args, { env, input, encoding: "utf8", timeout: 30000 });
-  return { root, home, managed, fakeState, log, env, run };
+  const runFrom = (program, args, input) => spawnSync(program, args, { env, input, encoding: "utf8", timeout: 30000 });
+  const run = (args, input) => runFrom(setup, args, input);
+  return { root, home, managed, fakeState, log, env, run, runFrom };
 }
 
 function json(result) {
@@ -282,6 +289,13 @@ describe("setup public CLI", () => {
     keybindings.addedAfterInstall = ["ctrl+x"];
     keybindings["app.model.cycleForward"] = ["ctrl+m"];
     writeFileSync(keybindingsPath, `${JSON.stringify(keybindings)}\n`);
+    const firecodePath = join(agent, "extensions", "firecode", "config.jsonc");
+    const firecode = JSON.parse(readFileSync(firecodePath, "utf8"));
+    firecode.features.header = false;
+    firecode.custom = { retained: true };
+    writeFileSync(firecodePath, `${JSON.stringify(firecode)}\n`);
+    expect(f.run(["update", "--yes", "--json"]).status).toBe(0);
+    expect(JSON.parse(readFileSync(firecodePath, "utf8")).features.header).toBe(false);
     expect(f.run(["uninstall", "--yes", "--json"]).status).toBe(0);
     expect(readFileSync(join(agent, "SYSTEM.md"), "utf8")).toBe("original system\n");
     expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({
@@ -294,6 +308,7 @@ describe("setup public CLI", () => {
       addedAfterInstall: ["ctrl+x"],
     });
     expect(readFileSync(join(agent, "bark-key"), "utf8")).toBe("original bark\n");
+    expect(JSON.parse(readFileSync(firecodePath, "utf8"))).toEqual({ features: { header: false }, custom: { retained: true } });
     writeFileSync(join(agent, "SYSTEM.md"), "second system\n");
     expect(apply(f, "core", ["--replace-system"]).status).toBe(0);
     expect(f.run(["uninstall", "--yes", "--json"]).status).toBe(0);
@@ -310,6 +325,18 @@ describe("setup public CLI", () => {
     expect(result.stderr).toContain("接管清单");
     expect(existsSync(join(f.managed, "backups", "pi-settings.json.absent"))).toBe(true);
     expect(existsSync(join(f.managed, "ownership", "pi-settings"))).toBe(true);
+  });
+
+  test("damaged configuration ownership fails closed", () => {
+    const f = fixture(ready({ "auth-openai-codex": "" }));
+    expect(apply(f).status).toBe(0);
+    const ownership = join(f.managed, "pi-managed.json");
+    writeFileSync(ownership, "{damaged\n");
+    const result = f.run(["repair", "--yes", "--json"]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("动作失败: configure_pi");
+    expect(existsSync(join(f.managed, "backups", "firecode-config.jsonc.absent"))).toBe(true);
+    expect(existsSync(join(f.managed, "ownership", "firecode-config"))).toBe(true);
   });
 
   test("managed SYSTEM updates only while untouched and detaches when kept", () => {
@@ -376,7 +403,10 @@ describe("setup public CLI", () => {
     expect(result.status).toBe(0, result.stderr);
     const agent = join(f.home, ".pi", "agent");
     const settings = JSON.parse(readFileSync(join(agent, "settings.json"), "utf8"));
-    expect(settings.enabledModels).toEqual(["openai-codex/gpt-5.6-sol"]);
+    expect(settings.enabledModels).toEqual([
+      "openai-codex/gpt-5.6-sol", "openai-codex/gpt-5.6-terra", "openai-codex/gpt-5.6-luna",
+      "openai-codex/gpt-5.4-mini", "openai-codex/gpt-5.3-codex-spark",
+    ]);
     const firecode = JSON.parse(readFileSync(join(agent, "extensions", "firecode", "config.jsonc"), "utf8"));
     expect(firecode.features.master).toBe(true);
     expect(firecode.features.review).toBe(false);
@@ -390,6 +420,73 @@ describe("setup public CLI", () => {
     expect(JSON.stringify(firecode)).not.toContain("anthropic/");
     expect(existsSync(join(f.managed, "pi-package", "firecode", "config.jsonc"))).toBe(false);
     expect(existsSync(join(f.managed, "pi-package", "firecode", "config.example.jsonc"))).toBe(true);
+  });
+
+  test("full mode generates the complete current FireCode recommendation when providers are ready", () => {
+    const f = fixture(ready({
+      "auth-openai-codex": "", "auth-anthropic": "", "auth-xai": "", "auth-deepseek": "",
+      "auth-kimi-coding": "", "auth-antigravity": "",
+    }));
+    expect(apply(f, "full").status).toBe(0);
+    const config = JSON.parse(readFileSync(join(f.home, ".pi", "agent", "extensions", "firecode", "config.jsonc"), "utf8"));
+    expect(Object.keys(config.presets)).toEqual(["fable", "opus5", "sol", "gemini", "ds", "k3-256", "xai"]);
+    expect(config.master.models).toHaveLength(6);
+    expect(config.review.reviewers).toHaveLength(3);
+    expect(config.features).toMatchObject({ presets: true, master: true, review: true });
+  });
+
+  test("Architecture Wiki defaults to Chinese, persists, and switches atomically to English", () => {
+    const f = fixture(ready());
+    expect(apply(f).status).toBe(0);
+    const skill = join(f.managed, "pi-package", "skills", "development", "architecture-wiki", "SKILL.md");
+    expect(readFileSync(skill, "utf8")).toContain("代码是事实源");
+    expect(JSON.parse(readFileSync(join(f.managed, "state.json"), "utf8")).architecture_language).toBe("zh");
+
+    const switched = f.run(["repair", "--yes", "--json", "--architecture-language", "en"]);
+    expect(switched.status).toBe(0, switched.stderr);
+    expect(readFileSync(skill, "utf8")).toContain("Code is the source of truth");
+    expect(JSON.parse(readFileSync(join(f.managed, "state.json"), "utf8")).architecture_language).toBe("en");
+    expect(f.run(["update", "--yes", "--json"]).status).toBe(0);
+    expect(readFileSync(skill, "utf8")).toContain("Code is the source of truth");
+  });
+
+  test("installed Release runtime completes lifecycle without its source checkout", () => {
+    const f = fixture(ready());
+    const release = join(f.root, "release-checkout");
+    mkdirSync(release);
+    copyFileSync(setup, join(release, "setup"));
+    chmodSync(join(release, "setup"), 0o755);
+    for (const directory of ["lib", "scripts", "resources", "packages"])
+      cpSync(resolve(import.meta.dir, "..", directory), join(release, directory), { recursive: true });
+
+    expect(f.runFrom(join(release, "setup"), ["apply", "--mode", "core", "--keep-system", "--yes", "--json"]).status).toBe(0);
+    const runtimeSetup = join(f.managed, "runtime", "setup");
+    rmSync(release, { recursive: true });
+    expect(f.runFrom(runtimeSetup, ["update", "--yes", "--json"]).status).toBe(0);
+    expect(f.runFrom(runtimeSetup, ["repair", "--yes", "--json", "--architecture-language", "en"]).status).toBe(0);
+    const skill = join(f.managed, "pi-package", "skills", "development", "architecture-wiki", "SKILL.md");
+    expect(readFileSync(skill, "utf8")).toContain("Code is the source of truth");
+    expect(f.runFrom(runtimeSetup, ["uninstall", "--yes", "--json"]).status).toBe(0);
+  });
+
+  test("independent FireCode requires explicit migration", () => {
+    const f = fixture(ready({ independent_firecode: "" }));
+    const standalone = join(f.home, ".pi", "agent", "extensions", "firecode");
+    mkdirSync(standalone, { recursive: true });
+    writeFileSync(join(standalone, "index.ts"), "export { default } from './source/index.ts';\n");
+    mkdirSync(join(standalone, "source"));
+    writeFileSync(join(standalone, "source", "index.ts"), "export default function firecode() {}\n");
+    writeFileSync(join(standalone, "config.jsonc"), '{"custom":{"retained":true}}\n');
+    const refused = apply(f);
+    expect(refused.status).toBe(3);
+    expect(refused.stderr).toContain("--migrate-firecode");
+    const migrated = f.run(["apply", "--mode", "core", "--keep-system", "--migrate-firecode", "--yes", "--json"]);
+    expect(migrated.status).toBe(0, migrated.stderr);
+    expect(readFileSync(f.log, "utf8")).toContain("pi remove /tmp/pi-firecode");
+    expect(existsSync(join(standalone, "index.ts"))).toBe(false);
+    expect(existsSync(join(standalone, "source"))).toBe(false);
+    expect(JSON.parse(readFileSync(join(standalone, "config.jsonc"), "utf8")).custom).toEqual({ retained: true });
+    expect(existsSync(join(f.managed, "backups", "independent-firecode", "index.ts"))).toBe(true);
   });
 
   test("runtime FireCode configuration write failures fail apply", () => {

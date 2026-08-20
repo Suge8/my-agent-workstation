@@ -60,8 +60,18 @@ shell_hook_body() {
 }
 
 workstation_detect() {
+  FIRECODE_STATUS=external
+  firecode_package=$(pi list 2>/dev/null | awk -v owned="$PACKAGE_HOME" 'index(tolower($0), "firecode") && index($0, owned) == 0 { print; exit }')
+  standalone_firecode="$PI_AGENT_HOME/extensions/firecode"
+  if test -n "$firecode_package" || test -L "$standalone_firecode" || test -e "$standalone_firecode/index.ts" || test -e "$standalone_firecode/source"; then
+    FIRECODE_STATUS=independent
+  fi
   PACKAGE_STATUS=missing
   test -f "$PACKAGE_HOME/package.json" && check_integrity package && PACKAGE_STATUS=normal
+  ARCHITECTURE_STATUS=missing
+  if test "$PACKAGE_STATUS" = normal && test -f "$STATE_HOME/architecture-language" &&
+     test "$(cat "$STATE_HOME/architecture-language")" = "$ARCHITECTURE_LANGUAGE" &&
+     test -f "$PACKAGE_HOME/skills/development/architecture-wiki/SKILL.md"; then ARCHITECTURE_STATUS=normal; fi
   SYSTEM_STATUS=missing
   if test -f "$PI_AGENT_HOME/SYSTEM.md"; then
     if owns_component system; then
@@ -91,6 +101,8 @@ workstation_detect() {
 workstation_print_doctor_json() {
   printf ',"workstation":{'
   printf '"package":{"status":"%s"},' "$PACKAGE_STATUS"
+  printf '"firecode":{"status":"%s"},' "$FIRECODE_STATUS"
+  printf '"architecture_wiki":{"status":"%s","language":"%s"},' "$ARCHITECTURE_STATUS" "$ARCHITECTURE_LANGUAGE"
   printf '"system_prompt":{"status":"%s"},' "$SYSTEM_STATUS"
   printf '"terminal":{"status":"%s"},' "$TERMINAL_STATUS"
   printf '"helium":{"status":"%s"},' "$HELIUM_STATUS"
@@ -100,7 +112,8 @@ workstation_print_doctor_json() {
 
 workstation_append_plan() {
   workstation_mode_defaults || return
-  if test "$PACKAGE_STATUS" != normal || test "$FORCE_UPDATE" -eq 1; then ACTIONS+=(install_workstation_package); fi
+  if test "$FIRECODE_STATUS" = independent && test "$MIGRATE_FIRECODE" -eq 1; then ACTIONS+=(migrate_independent_firecode); fi
+  if test "$PACKAGE_STATUS" != normal || test "$ARCHITECTURE_STATUS" != normal || test "$FORCE_UPDATE" -eq 1; then ACTIONS+=(install_workstation_package); fi
   ACTIONS+=(configure_pi)
   if test "$REPLACE_SYSTEM" -eq 1; then ACTIONS+=(replace_system); fi
   if test "$WITH_BCU" -eq 1; then
@@ -205,9 +218,13 @@ install_workstation_package() {
   mkdir -p "$temporary"
   cp -R "$ROOT/packages/firecode" "$temporary/firecode"
   cp -R "$ROOT/packages/skills" "$temporary/skills"
+  rm -rf "$temporary/skills/development/architecture-wiki"
+  mkdir -p "$temporary/skills/development"
+  cp -R "$ROOT/resources/architecture-wiki/$ARCHITECTURE_LANGUAGE" "$temporary/skills/development/architecture-wiki"
   printf '%s\n' '{"name":"my-agent-workstation-pi","version":"0.1.0","private":true,"keywords":["pi-package"],"pi":{"extensions":["firecode/index.ts"],"skills":["skills"]}}' > "$temporary/package.json"
   rm -rf "$PACKAGE_HOME"
   mv "$temporary" "$PACKAGE_HOME"
+  printf '%s\n' "$ARCHITECTURE_LANGUAGE" > "$STATE_HOME/architecture-language"
   pi install "$PACKAGE_HOME" >/dev/null
   if pi list 2>/dev/null | grep -Fq 'pi-antigravity'; then
     if test "$FORCE_UPDATE" -eq 1; then pi update npm:pi-antigravity >/dev/null; fi
@@ -247,10 +264,13 @@ available_models() {
 
 configure_pi() {
   mkdir -p "$PI_AGENT_HOME"
+  if { owns_component pi-settings || owns_component pi-keybindings || owns_component firecode-config; } && test ! -f "$STATE_HOME/pi-managed.json"; then
+    printf 'Pi/FireCode 配置接管清单缺失；已停止并保留 backups。\n' >&2
+    return 1
+  fi
   backup_once "$PI_AGENT_HOME/settings.json" pi-settings.json
   backup_once "$PI_AGENT_HOME/keybindings.json" pi-keybindings.json
-  own_component pi-settings
-  own_component pi-keybindings
+  backup_once "$PI_AGENT_HOME/extensions/firecode/config.jsonc" firecode-config.jsonc
   providers=$(authenticated_providers)
   models=$(available_models)
   stored_selections="$STATE_HOME/model-selections.json"
@@ -271,6 +291,9 @@ configure_pi() {
     --firecode "$PI_AGENT_HOME/extensions/firecode/config.jsonc"
   if test -n "$SELECTIONS"; then set -- "$@" --selections "$SELECTIONS"; fi
   node "$ROOT/scripts/configure-workstation.mjs" "$@" >/dev/null || return
+  own_component pi-settings
+  own_component pi-keybindings
+  own_component firecode-config
   record_package_integrity || return
   if test -z "$providers" && test "$JSON" -eq 0; then
     printf '未检测到已认证模型；FireCode 模型能力保持关闭。请在 Pi 中运行 /login 后重试配置。\n' >&2
@@ -278,17 +301,19 @@ configure_pi() {
 }
 
 restore_pi_configuration() {
-  owns_component pi-settings || owns_component pi-keybindings || return 0
+  owns_component pi-settings || owns_component pi-keybindings || owns_component firecode-config || return 0
   node "$ROOT/scripts/configure-workstation.mjs" \
     --mode restore \
     --ownership "$STATE_HOME/pi-managed.json" \
     --pi-settings "$PI_AGENT_HOME/settings.json" \
     --pi-keybindings "$PI_AGENT_HOME/keybindings.json" \
+    --firecode "$PI_AGENT_HOME/extensions/firecode/config.jsonc" \
     --pi-settings-backup "$BACKUP_HOME/pi-settings.json" \
     --pi-keybindings-backup "$BACKUP_HOME/pi-keybindings.json" >/dev/null || return
   retire_backup pi-settings.json || return
   retire_backup pi-keybindings.json || return
-  rm -f "$OWNERSHIP_HOME/pi-settings" "$OWNERSHIP_HOME/pi-keybindings"
+  retire_backup firecode-config.jsonc || return
+  rm -f "$OWNERSHIP_HOME/pi-settings" "$OWNERSHIP_HOME/pi-keybindings" "$OWNERSHIP_HOME/firecode-config"
 }
 
 detach_system() {
@@ -445,8 +470,26 @@ install_helium() {
   brew install --cask helium-browser >/dev/null
 }
 
+migrate_independent_firecode() {
+  mkdir -p "$BACKUP_HOME"
+  if test -n "$firecode_package"; then pi remove "$firecode_package" >/dev/null || return; fi
+  if test -L "$standalone_firecode"; then
+    test -e "$BACKUP_HOME/independent-firecode" || cp -P "$standalone_firecode" "$BACKUP_HOME/independent-firecode" || return
+    temporary_config="$STATE_HOME/firecode-config.$$.jsonc"
+    test ! -f "$standalone_firecode/config.jsonc" || cp "$standalone_firecode/config.jsonc" "$temporary_config" || return
+    rm "$standalone_firecode" || return
+    mkdir -p "$standalone_firecode"
+    test ! -f "$temporary_config" || { mv "$temporary_config" "$standalone_firecode/config.jsonc" || return; }
+  elif test -e "$standalone_firecode/index.ts" || test -e "$standalone_firecode/source"; then
+    test -e "$BACKUP_HOME/independent-firecode" || cp -R "$standalone_firecode" "$BACKUP_HOME/independent-firecode" || return
+    rm -rf "$standalone_firecode/index.ts" "$standalone_firecode/source" || return
+  fi
+  FIRECODE_STATUS=external
+}
+
 workstation_run_action() {
   case "$1" in
+    migrate_independent_firecode) migrate_independent_firecode ;;
     install_workstation_package) install_workstation_package ;;
     configure_pi) configure_pi ;;
     replace_system) replace_system ;;
@@ -506,7 +549,7 @@ workstation_uninstall() {
     npm uninstall --global better-computer-use >/dev/null 2>&1 || return
     rm -f "$OWNERSHIP_HOME/bcu"
   fi
-  rm -rf "$PACKAGE_HOME" "$STATE_HOME/config" "$RUNTIME_HOME" "$INTEGRITY_HOME" "$OWNERSHIP_HOME" "$STATE_HOME/pi-managed.json" "$STATE_HOME/system-installed.md" "$STATE_HOME/herdr-official"
+  rm -rf "$PACKAGE_HOME" "$STATE_HOME/config" "$RUNTIME_HOME" "$INTEGRITY_HOME" "$OWNERSHIP_HOME" "$STATE_HOME/pi-managed.json" "$STATE_HOME/system-installed.md" "$STATE_HOME/herdr-official" "$STATE_HOME/architecture-language"
   printf '{"schema":1,"status":"uninstalled","backups":"%s"}\n' "$BACKUP_HOME" > "$STATE_HOME/state.json"
 }
 
@@ -580,6 +623,11 @@ workstation_wizard() {
       ;;
     *) printf '无效选择。\n' >&2; return 64 ;;
   esac
+  printf 'Architecture Wiki 语言 [zh/en，默认 zh]: '
+  IFS= read -r architecture_language || architecture_language=
+  ARCHITECTURE_LANGUAGE=${architecture_language:-zh}
+  case "$ARCHITECTURE_LANGUAGE" in zh|en) ;; *) printf '无效语言。\n' >&2; return 64 ;; esac
+  ARCHITECTURE_LANGUAGE_EXPLICIT=1
   printf '模型选择 JSON 路径（留空则按现有认证自动启用并禁用不可用角色）: '
   IFS= read -r model_choices || model_choices=
   if test -n "$model_choices"; then

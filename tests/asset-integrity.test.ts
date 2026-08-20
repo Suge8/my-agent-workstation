@@ -8,6 +8,7 @@ const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FIRECODE = join(REPO, "packages", "firecode");
 const SKILLS = join(REPO, "packages", "skills");
 const PI_CONFIG = join(REPO, "packages", "pi-config");
+const ARCHITECTURE = join(REPO, "resources", "architecture-wiki");
 
 async function exists(path: string): Promise<boolean> {
 	try {
@@ -73,7 +74,7 @@ const SECRET_PATTERNS = [
 	/\b(?:api[_-]?key|access[_-]?token|secret[_-]?key|password)\s*[:=]\s*(?:"[A-Za-z0-9+/=_-]{16,}"|'[A-Za-z0-9+/=_-]{16,}')/i,
 ];
 
-const assetRoots = [FIRECODE, PI_CONFIG, SKILLS];
+const assetRoots = [FIRECODE, PI_CONFIG, SKILLS, ARCHITECTURE];
 let firecodeLoader: { cleanupFirecodeModules: () => Promise<void> } | undefined;
 
 afterAll(async () => {
@@ -89,7 +90,11 @@ test("发行包只包含允许的资产范围", async () => {
 	expect(await exists(join(FIRECODE, "config.jsonc"))).toBe(false);
 	expect(await exists(join(FIRECODE, "AGENTS.md"))).toBe(true);
 	expect(await exists(join(FIRECODE, "CONTEXT.md"))).toBe(true);
+	expect(await exists(join(FIRECODE, "package.json"))).toBe(true);
 	expect(await exists(join(PI_CONFIG, "SYSTEM.md"))).toBe(true);
+	expect(await exists(join(SKILLS, "development", "architecture-wiki"))).toBe(false);
+	expect(await exists(join(ARCHITECTURE, "zh", "SKILL.md"))).toBe(true);
+	expect(await exists(join(ARCHITECTURE, "en", "SKILL.md"))).toBe(true);
 	expect((await files(SKILLS)).filter((path) => basename(path) === "SKILL.md").length).toBeGreaterThan(0);
 });
 
@@ -130,7 +135,9 @@ test("FireCode 通过现有 loader 接缝可加载", async () => {
 test("FireCode 公开模板不会启用需要认证或模型配置的能力", async () => {
 	const loader = await import("../packages/firecode/tests/loader.ts");
 	firecodeLoader = loader;
-	const module = await loader.loadFirecodeModule("config.ts");
+	const module = await loader.loadFirecodeModule("config.ts", {
+		configJsonc: await readFile(join(FIRECODE, "config.example.jsonc"), "utf8"),
+	});
 	const loaded = (module.loadConfig as () => { config: { features: Record<string, boolean> } })();
 	for (const feature of ["claudeSub", "openaiNative", "master", "review"])
 		expect(loaded.config.features[feature]).toBe(false);

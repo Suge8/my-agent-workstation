@@ -2,7 +2,26 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cleanupFirecodeModules, loadFirecodeModule } from "./loader.ts";
+import { cleanupFirecodeModules, loadFirecodeModule as loadModule, TEST_REVIEW_CONFIG } from "./loader.ts";
+
+const TEST_MASTER_MODELS = [
+	{ model: "test/worker", thinking: "medium", use: "测试" },
+];
+type LoadOptions = NonNullable<Parameters<typeof loadModule>[1]>;
+
+function loadFirecodeModule(entry: string, options: LoadOptions = {}) {
+	const config = options.configJsonc
+		? JSON.parse(options.configJsonc) as Record<string, unknown>
+		: { features: { review: false, master: true } };
+	return loadModule(entry, {
+		...options,
+		configJsonc: JSON.stringify({
+			...config,
+			review: TEST_REVIEW_CONFIG,
+			master: { models: TEST_MASTER_MODELS },
+		}),
+	});
+}
 
 const savedEnv = ["HERDR_ENV", "HERDR_WORKSPACE_ID", "FIRECODE_MASTER_WORKER"].map(
 	(name) => [name, process.env[name]] as const,
@@ -14,6 +33,31 @@ afterEach(async () => {
 		else process.env[name] = value;
 	}
 	await cleanupFirecodeModules();
+});
+
+test("Master activation requires an explicitly configured public roster", async () => {
+	process.env.HERDR_ENV = "1";
+	process.env.HERDR_WORKSPACE_ID = "w1";
+	delete process.env.FIRECODE_MASTER_WORKER;
+	const module = (await loadModule("master/index.js", {
+		configJsonc: '{"features":{"master":true}}',
+	})) as { registerMaster: (pi: unknown) => void };
+	const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
+	let activeTools = ["read", "bash"];
+	const notices: string[] = [];
+	module.registerMaster({
+		registerMessageRenderer() {},
+		registerCommand: (name: string, command: { handler: (args: string, ctx: unknown) => Promise<void> }) => commands.set(name, command),
+		registerTool() {},
+		getActiveTools: () => [...activeTools],
+		setActiveTools: (next: string[]) => { activeTools = next; },
+		on() {},
+		events: { on() {}, emit() {} },
+	} as never);
+
+	await commands.get("fire-master")?.handler("", makeCtx(notices));
+	expect(activeTools).toEqual(["read", "bash"]);
+	expect(notices).toEqual(["Master 配置有问题，已停止：请显式配置 master.models 选型表"]);
 });
 
 test("master mode is opt-in and only appends subagents", async () => {
@@ -195,10 +239,10 @@ test("Worker results return as follow-up custom messages", async () => {
 	await expect(tools.get("subagents")?.execute("call", { action: "start", prompt: "做", model: "vendor/not-in-roster" }, undefined, undefined, ctx))
 		.rejects.toThrow("不在选型表");
 	// thinking 同样必填：档位直接决定花销，继承指挥官的思考等级也是静默花钱。
-	await expect(tools.get("subagents")?.execute("call", { action: "start", prompt: "做", model: "openai-codex/gpt-5.6-sol" }, undefined, undefined, ctx))
+	await expect(tools.get("subagents")?.execute("call", { action: "start", prompt: "做", model: "test/worker" }, undefined, undefined, ctx))
 		.rejects.toThrow("必须显式指定 thinking");
-	const started = await tools.get("subagents")?.execute("call", { action: "start", prompt: "做", model: "openai-codex/gpt-5.6-sol", thinking: "high" }, undefined, undefined, ctx) as { details: { worker: { model: string; thinking: string } } };
-	expect(started.details.worker).toMatchObject({ model: "openai-codex/gpt-5.6-sol", thinking: "high" });
+	const started = await tools.get("subagents")?.execute("call", { action: "start", prompt: "做", model: "test/worker", thinking: "high" }, undefined, undefined, ctx) as { details: { worker: { model: string; thinking: string } } };
+	expect(started.details.worker).toMatchObject({ model: "test/worker", thinking: "high" });
 	await new Promise((resolve) => setTimeout(resolve, 120));
 	expect(messages).toEqual([{
 		message: {
@@ -268,7 +312,7 @@ test("review action exposes reviewing in Master status without accepting prompt 
 	};
 	module.registerMaster(pi);
 	await commands.get("fire-master")?.handler("", ctx);
-	await tools.get("subagents")?.execute("call", { action: "start", prompt: "做", model: "openai-codex/gpt-5.6-sol", thinking: "medium" }, undefined, undefined, ctx);
+	await tools.get("subagents")?.execute("call", { action: "start", prompt: "做", model: "test/worker", thinking: "medium" }, undefined, undefined, ctx);
 	const result = await tools.get("subagents")?.execute(
 		"call",
 		{ action: "review", worker: "worker-1", prompt: "malicious override" },

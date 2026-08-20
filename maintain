@@ -12,7 +12,7 @@ case "$command" in
     bun run check:shell
     ;;
   *)
-    printf '%s\n' '用法: maintain sync [--firecode <路径>] [--skills <路径>] [--system <路径>]' >&2
+    printf '%s\n' '用法: maintain sync [--firecode <路径>] [--skills <路径>] [--architecture <路径>] [--system <路径>]' >&2
     exit 64
     ;;
 esac

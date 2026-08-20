@@ -14,15 +14,14 @@ import {
 import { cleanupFirecodeModules, loadFirecodeModule } from "./loader.ts";
 
 const configModule = await loadFirecodeModule("config.js") as {
-	DEFAULT_MASTER_MODELS: MasterModel[];
 	parseMasterConfig(raw: Record<string, unknown>, problems: string[]): MasterConfig;
 };
-const { DEFAULT_MASTER_MODELS, parseMasterConfig } = configModule;
+const { parseMasterConfig } = configModule;
 afterAll(cleanupFirecodeModules);
 
-test("master 节省略时用默认花名册，无配置问题", () => {
+test("master 节省略时不注入公开默认花名册", () => {
 	const problems: string[] = [];
-	expect(parseMasterConfig({}, problems).models).toEqual(DEFAULT_MASTER_MODELS);
+	expect(parseMasterConfig({}, problems).models).toEqual([]);
 	expect(problems).toEqual([]);
 });
 

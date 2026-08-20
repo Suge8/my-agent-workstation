@@ -30,5 +30,6 @@ npm run test:bcu
 - 改 FireCode 时，先读取 `packages/firecode/AGENTS.md`；进入其子目录时继续读取最近的 `AGENTS.md`。
 - 改 BCU 时，先读取 `packages/better-computer-use/README.md` 了解运行边界与上游归属。
 - 改安装体验或公开行为时，对照 [README.md](README.md)；公开接口变化需同步更新对应用户文档。
+- 改 Architecture Wiki 发行或激活方式时，读取 [ADR 0001](docs/adr/0001-activate-one-architecture-wiki-language.md)。
 - 同步 FireCode、Skills 或 SYSTEM 时运行 `./maintain sync`；命令只生成并验证发行快照。
 - 准备贡献或处理安全报告时，分别读取 [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) 与 [.github/SECURITY.md](.github/SECURITY.md)。

@@ -45,11 +45,11 @@ test -n "$setup" && test -x "$setup"
 
 - 只检查或询问原因：停在 `doctor --json` 的解释。
 - 预览变更：调用 `plan`，解释动作、影响和保留项。
-- 安装、补装或配置：先 `plan`，确认后调用 `apply`。
+- 安装、补装或配置：先 `plan`，确认后调用 `apply`。按当前对话语言传 `--architecture-language zh` 或 `en`；判断不了时询问一次。
 - 验收环境：调用 `verify`。
 - 更新、修复或卸载：分别调用 `update`、`repair` 或 `uninstall`；先展示该命令给出的计划。
 
-计划涉及覆盖、卸载、SYSTEM、权限、OAuth 或密钥时，先读取并执行 [CONFIRMATIONS.md](CONFIRMATIONS.md)。用户未明确选择时停在计划；不把自然语言猜测当授权。所有实际读写仍由 `setup` 完成。
+计划涉及覆盖、卸载、SYSTEM、独立 FireCode 迁移、权限、OAuth 或密钥时，先读取并执行 [CONFIRMATIONS.md](CONFIRMATIONS.md)。用户未明确选择时停在计划；不把自然语言猜测当授权。所有实际读写仍由 `setup` 完成。
 
 **完成：** 只调用了所请求的生命周期能力；每个敏感关口已有明确选择，或流程安全停住。
 

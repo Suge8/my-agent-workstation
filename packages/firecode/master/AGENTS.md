@@ -15,8 +15,9 @@ session 路径，ADR-0005）。
 model 与 thinking 必须显式传，省略与表外模型在投递前拒绝并回带选型表，只有唤醒池内 dormant 沿用档案——
 提示词的“显式传”打不过参数的“可省略”，静默继承会拿最贵的一档真实开工。
 
-config.jsonc 的 `master` 节是 models 选型表（模型 id + 默认 thinking + 适用场景），注入 subagents 工具提示词；
-该节有配置问题时 `/fire-master` 激活与恢复拒绝启动——选型表错误会拿错模型真实发起 Worker。
+config.jsonc 的 `master.models` 是必填选型表（模型 id + 默认 thinking + 适用场景），注入 subagents 工具提示词；
+公开包不内置依赖个人认证或偏好的模型。该表缺失、为空或有配置问题时 `/fire-master` 激活与恢复拒绝启动——
+选型表错误会拿错模型真实发起 Worker。
 
 start 的 `cwd` 参数指定子代理工作目录（绝对路径、必须已存在，校验失败拒绝启动；目录随档案持久化，休眠
 恢复回到同一 checkout）——能力缺口会把模型逼上 CLI 逃生路径（ADR-0005）；guidelines 不教 worktree，共享

@@ -4,7 +4,7 @@ import { rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ReviewerResult } from "../review/state.js";
-import { cleanupFirecodeModules, loadFirecodeModule } from "./loader.ts";
+import { cleanupFirecodeModules, loadFirecodeModule, TEST_REVIEW_CONFIG } from "./loader.ts";
 
 type RegisterReview = typeof import("../review/index.js").registerReview;
 type Flush = typeof import("../review/index.js").__reviewFlushForTests;
@@ -135,12 +135,10 @@ async function loadReviewWithVerdict(verdict: string, maxRounds?: number) {
 	});
 	await writeFile(script, `#!/bin/bash\nprintf '%s\\n' '${event}'\n`, { mode: 0o755 });
 	const review = (await loadFirecodeModule("review/index.js", {
-		configJsonc: JSON.stringify({
-			review: {
-				reviewers: [{ model: "p/one", thinking: "low" }],
-				...(maxRounds === undefined ? {} : { maxRounds }),
-				background: { command: script },
-			},
+		configJsonc: reviewConfig({
+			reviewers: [{ model: "p/one", thinking: "low" }],
+			...(maxRounds === undefined ? {} : { maxRounds }),
+			background: { command: script },
 		}),
 	})) as { registerReview: (pi: unknown) => void };
 	const checkpoint = (await loadFirecodeModule("review/checkpoint.js")) as {
@@ -165,6 +163,8 @@ async function loadSingleFailReview() {
 
 const OCCUPIED = { name: "herdr:blocked", data: { active: true, label: "对抗审查进行中" } };
 const RELEASED = { name: "herdr:blocked", data: { active: false } };
+const reviewConfig = (overrides: Record<string, unknown> = {}) =>
+	JSON.stringify({ review: { ...TEST_REVIEW_CONFIG, ...overrides } });
 
 describe("registerReview wiring", () => {
 	test("registers the card renderer eagerly (top level, not in session_start)", async () => {
@@ -403,7 +403,7 @@ describe("registerReview wiring", () => {
 
 	test("installs the activity bar and locks editor when review starts", async () => {
 		const module = (await loadFirecodeModule("review/index.js", {
-			configJsonc: `{ "review": { "background": { "command": "/usr/bin/true" } } }`,
+			configJsonc: reviewConfig({ background: { command: "/usr/bin/true" } }),
 		})) as { registerReview: (pi: unknown) => void; __reviewFlushForTests: () => Promise<void> };
 		const sessionManager = makeSessionManager();
 		const { pi, registered } = makePi(sessionManager);
@@ -569,7 +569,7 @@ describe("registerReview wiring", () => {
 
 	test("review accepts focus text and rejects flags in the configured language", async () => {
 		const module = (await loadFirecodeModule("review/index.js", {
-			configJsonc: `{ "review": { "language": "en" } }`,
+			configJsonc: reviewConfig({ language: "en" }),
 		})) as {
 			registerReview: (pi: unknown) => void;
 			__reviewFlushForTests: () => Promise<void>;
@@ -794,6 +794,27 @@ describe("review config is rejected at every entry point", () => {
 		};
 	}
 
+	test("enabled Review requires an explicit complete section with models", async () => {
+		for (const configJsonc of [
+			'{"features":{"review":true}}',
+			reviewConfig({ advisor: { model: "", thinking: "high" }, reviewers: [] }),
+		]) {
+			const { registerReview } = await loadWithConfig(configJsonc);
+			const sessionManager = makeSessionManager();
+			const { pi, registered } = makePi(sessionManager);
+			registerReview(pi);
+			const notices: string[] = [];
+			const ctx = makeCtx(sessionManager);
+			ctx.ui.notify = (message: string) => notices.push(message);
+			const command = registered.commands.get("fire-review") as {
+				handler: (args: string, ctx: unknown) => Promise<void>;
+			};
+			await command.handler("", ctx);
+			expect(notices.join()).toContain("配置有问题");
+			expect(sessionManager.entries).toHaveLength(0);
+		}
+	});
+
 	test("the command refuses to start and spawns nothing", async () => {
 		const { registerReview } = await loadWithConfig(brokenConfig);
 		const sessionManager = makeSessionManager();
@@ -896,11 +917,9 @@ describe("reload recovery actually resumes the loop", () => {
 		const script = join(tmpdir(), `fire-review-resume-${Date.now()}.sh`);
 		await writeFile(script, `#!/bin/sh\ntouch '${marker}'\n`, { mode: 0o755 });
 		const module = (await loadFirecodeModule("review/index.js", {
-			configJsonc: JSON.stringify({
-				review: {
-					reviewers: [{ model: "p/one", thinking: "low" }],
-					background: { command: script },
-				},
+			configJsonc: reviewConfig({
+				reviewers: [{ model: "p/one", thinking: "low" }],
+				background: { command: script },
 			}),
 		})) as { registerReview: (pi: unknown) => void; __reviewFlushForTests: () => Promise<void> };
 		const sessionManager = makeSessionManager();
@@ -984,7 +1003,7 @@ describe("reload recovery actually resumes the loop", () => {
 	test("a queued review resumes on session_start when the session is idle", async () => {
 		const { registerReview } = (await loadFirecodeModule("review/index.js", {
 			// 子进程立即退出：只验证循环是否真的被推进，不依赖模型
-			configJsonc: `{ "review": { "background": { "command": "/usr/bin/true" } } }`,
+			configJsonc: reviewConfig({ background: { command: "/usr/bin/true" } }),
 		})) as { registerReview: (pi: unknown) => void };
 		const checkpointModule = (await loadFirecodeModule("review/checkpoint.js")) as {
 			readCheckpoint: (ctx: unknown) => { phase: string } | undefined;

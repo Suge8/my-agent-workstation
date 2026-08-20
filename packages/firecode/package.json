@@ -1,0 +1,25 @@
+{
+  "name": "pi-firecode",
+  "version": "0.1.0",
+  "description": "A modular Pi extension for terminal UI, session workflows, adversarial review, and delegated agents",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "pi-extension"
+  ],
+  "scripts": {
+    "test": "bun test"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  }
+}

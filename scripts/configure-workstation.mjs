@@ -14,7 +14,7 @@ function args(argv) {
 		options[flag.slice(2)] = value;
 	}
 	const required = options.mode === "restore"
-		? ["pi-settings", "pi-keybindings", "pi-settings-backup", "pi-keybindings-backup", "ownership"]
+		? ["pi-settings", "pi-keybindings", "pi-settings-backup", "pi-keybindings-backup", "firecode", "ownership"]
 		: ["profile", "pi-settings", "pi-keybindings", "firecode", "ownership"];
 	for (const name of required) if (!options[name]) throw new Error(`缺少 --${name}`);
 	return options;
@@ -67,6 +67,43 @@ function restoreSettings(current, baseline, managed) {
 	return restored;
 }
 
+const FIRECODE_PATHS = [
+	...["header", "statusbar", "tools", "presets", "rename", "stats", "claudeSub", "openaiNative", "workingFlame", "bark", "review", "master"].map((name) => ["features", name]),
+	["openai", "nativeCompaction"], ["openai", "providers", "openai-codex", "textVerbosity"], ["openai", "providers", "openai-codex", "priority"], ["openai", "providers", "xai", "priority"],
+	["keys", "rename"], ["keys", "cyclePreset"], ["keys", "fast"], ["master", "models"], ["review", "advisor"], ["review", "reviewers"],
+];
+
+function valueAt(object, path) {
+	let value = object;
+	for (const key of path) {
+		if (!value || typeof value !== "object" || !Object.hasOwn(value, key)) return { exists: false };
+		value = value[key];
+	}
+	return { exists: true, value };
+}
+
+function same(left, right) {
+	return left.exists === right.exists && (!left.exists || JSON.stringify(left.value) === JSON.stringify(right.value));
+}
+
+function setAt(object, path, state) {
+	let target = object;
+	for (const key of path.slice(0, -1)) target = target[key] ??= {};
+	const key = path.at(-1);
+	if (state.exists) target[key] = state.value;
+	else delete target[key];
+}
+
+function prune(object) {
+	for (const [key, value] of Object.entries(object)) {
+		if (value && typeof value === "object" && !Array.isArray(value)) {
+			prune(value);
+			if (!Object.keys(value).length) delete object[key];
+		}
+	}
+	return object;
+}
+
 export async function restore(options) {
 	const ownershipPath = resolve(options.ownership);
 	if (!existsSync(ownershipPath)) throw new Error("Pi 配置接管清单缺失；已保留 backups，请恢复清单或手动回退");
@@ -74,18 +111,25 @@ export async function restore(options) {
 	const keybindingsPath = resolve(options["pi-keybindings"]);
 	const settingsBackup = resolve(options["pi-settings-backup"]);
 	const keybindingsBackup = resolve(options["pi-keybindings-backup"]);
-	const [settings, keybindings, baselineSettings, baselineKeybindings, ownership] = await Promise.all([
+	const firecodePath = resolve(options.firecode);
+	const [settings, keybindings, firecode, baselineSettings, baselineKeybindings, ownership] = await Promise.all([
 		readObject(settingsPath),
 		readObject(keybindingsPath),
+		readObject(firecodePath, true),
 		readObject(settingsBackup),
 		readObject(keybindingsBackup),
 		readObject(ownershipPath),
 	]);
 	const restoredSettings = restoreSettings(settings, baselineSettings, ownership.settings ?? []);
 	const restoredKeybindings = restoreKeys(keybindings, baselineKeybindings, ownership.keybindings ?? []);
+	for (const entry of ownership.firecode ?? []) {
+		if (same(valueAt(firecode, entry.path), entry.applied)) setAt(firecode, entry.path, entry.baseline);
+	}
+	prune(firecode);
 	await Promise.all([
 		writeRestored(settingsPath, restoredSettings, existsSync(`${settingsBackup}.absent`)),
 		writeRestored(keybindingsPath, restoredKeybindings, existsSync(`${keybindingsBackup}.absent`)),
+		writeRestored(firecodePath, firecode, ownership.firecodeAbsent === true),
 	]);
 }
 
@@ -192,6 +236,20 @@ export async function configure(options) {
 	}
 	const ownershipPath = resolve(options.ownership);
 	const previousOwnership = await readObject(ownershipPath);
+	const previousFirecode = new Map((previousOwnership.firecode ?? []).map((entry) => [entry.path.join("."), entry]));
+	const managedFirecode = [];
+	for (const path of [...FIRECODE_PATHS, ...Object.keys(profile.presets).map((name) => ["presets", name])]) {
+		const key = path.join(".");
+		const previous = previousFirecode.get(key);
+		const current = valueAt(firecode, path);
+		if (previous && !same(current, previous.applied)) {
+			setAt(rendered.firecode, path, current);
+			continue;
+		}
+		const applied = valueAt(rendered.firecode, path);
+		managedFirecode.push({ path, baseline: previous?.baseline ?? current, applied });
+	}
+	prune(rendered.firecode);
 	const managedSettings = new Set(previousOwnership.settings ?? []);
 	managedSettings.add("warnings.anthropicExtraUsage");
 	if (managesModels) {
@@ -199,12 +257,18 @@ export async function configure(options) {
 	}
 	const managedKeybindings = new Set(previousOwnership.keybindings ?? []);
 	for (const key of Object.keys(profile.keybindings)) managedKeybindings.add(key);
+	const firecodeAbsent = previousOwnership.firecodeAbsent ?? !existsSync(firecodePath);
 	await Promise.all([
 		atomicJson(settingsPath, rendered.piSettings),
 		atomicJson(keybindingsPath, rendered.piKeybindings),
 		atomicJson(firecodePath, rendered.firecode),
-		atomicJson(ownershipPath, { settings: [...managedSettings], keybindings: [...managedKeybindings] }),
 	]);
+	await atomicJson(ownershipPath, {
+		settings: [...managedSettings],
+		keybindings: [...managedKeybindings],
+		firecodeAbsent,
+		firecode: managedFirecode,
+	});
 	return { configuredModels: rendered.piSettings.enabledModels?.length ?? 0, providers };
 }
 

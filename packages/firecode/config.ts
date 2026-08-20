@@ -58,13 +58,6 @@ export interface MasterConfig {
 	models: MasterModel[];
 }
 
-export const DEFAULT_MASTER_MODELS: MasterModel[] = [
-	{ model: "openai-codex/gpt-5.6-sol", thinking: "medium", use: "调研与实现/调试，调研完就在原 Worker 会话继续实现" },
-	{ model: "openai-codex/gpt-5.6-luna", thinking: "medium", use: "大规模并行快任务：整库扫冗余、批量审查、跨语言迁移，成批开多个" },
-	{ model: "anthropic/claude-fable-5", thinking: "medium", use: "架构" },
-	{ model: "kimi-coding/k3-256k", thinking: "medium", use: "设计师" },
-];
-
 export const FEATURES = [
 	"header",
 	"statusbar",
@@ -109,20 +102,16 @@ export type LoadedConfig = {
 
 export const CONFIG_PATH = join(getAgentDir(), "extensions", "firecode", "config.jsonc");
 
-function disabledFeatures(): Record<Feature, false> {
-	return Object.fromEntries(FEATURES.map((feature) => [feature, false])) as Record<Feature, false>;
-}
-
 function readFile(problems: string[]): Record<string, unknown> {
 	if (!existsSync(CONFIG_PATH)) {
 		problems.push("config.jsonc 不存在，已关闭可选功能");
-		return { features: disabledFeatures() };
+		return { features: Object.fromEntries(FEATURES.map((feature) => [feature, false])) };
 	}
 	try {
 		const parsed: unknown = parseJsonc(readFileSync(CONFIG_PATH, "utf8"));
 		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
 			problems.push("config.jsonc 顶层必须是对象");
-			return { features: disabledFeatures() };
+			return {};
 		}
 		return parsed as Record<string, unknown>;
 	} catch (error) {
@@ -130,7 +119,7 @@ function readFile(problems: string[]): Record<string, unknown> {
 		// 不能因为消息文本不带节名就被当成无关问题过滤掉。
 		const message = error instanceof Error ? error.message : String(error);
 		problems.push(`config.jsonc 解析失败：${message}`);
-		return { features: disabledFeatures() };
+		return {};
 	}
 }
 
@@ -193,7 +182,7 @@ export function loadConfig(): LoadedConfig {
 	const invalidFeatures = raw.features !== undefined && !isPlainObject(raw.features);
 	if (invalidFeatures) problems.push("features 必须是对象");
 	const features: Partial<Record<Feature, boolean>> = invalidFeatures
-		? disabledFeatures()
+		? Object.fromEntries(FEATURES.map((feature) => [feature, false]))
 		: asRecord(raw.features);
 	const rawKeys = asRecord(raw.keys);
 	const presets = asRecord(raw.presets) as Record<string, Preset>;
@@ -205,10 +194,12 @@ export function loadConfig(): LoadedConfig {
 	};
 	checkFeatures(features, problems);
 	checkKeys(keys, presets, problems);
-	// review 写成字符串/数组/null 时不能静默当空对象：那会拿默认模型真实发起审查。
+	// review 写成字符串/数组/null 或缺字段时不能静默补齐：会拿用户未选择的模型真实发起审查。
+	const reviewProblems: string[] = [];
 	if (raw.review !== undefined && !isPlainObject(raw.review))
-		problems.push("review 必须是对象");
-	const review = parseReviewConfig(asRecord(raw.review), problems);
+		reviewProblems.push("review 必须是对象");
+	const review = parseReviewConfig(asRecord(raw.review), reviewProblems);
+	if (raw.review !== undefined || features.review !== false) problems.push(...reviewProblems);
 	// master 同理：花名册错误会拿错模型真实发起 Worker，不能静默当空对象。
 	if (raw.master !== undefined && !isPlainObject(raw.master))
 		problems.push("master 必须是对象");
@@ -231,12 +222,7 @@ const REVIEW_KEYS = new Set([
 	"language",
 ]);
 const DEFAULT_TOOLS = ["read", "grep", "find", "ls", "bash"];
-const DEFAULT_ADVISOR: ReviewModel = { model: "kimi-coding/k3-256k", thinking: "max" };
-const DEFAULT_REVIEWERS: ReviewModel[] = [
-	{ model: "anthropic/claude-opus-5", thinking: "high" },
-	{ model: "anthropic/claude-sonnet-5", thinking: "high" },
-	{ model: "anthropic/claude-fable-5", thinking: "high" },
-];
+const EMPTY_REVIEW_MODEL: ReviewModel = { model: "", thinking: "medium" };
 const THINKING_LEVELS = new Set<ThinkingLevelValue>([
 	"off",
 	"minimal",
@@ -252,7 +238,9 @@ const LANGUAGES = new Set<Language>(["zh", "en"]);
 export function parseReviewConfig(raw: Record<string, unknown>, problems: string[]): ReviewConfig {
 	for (const key of Object.keys(raw))
 		if (!REVIEW_KEYS.has(key)) problems.push(`未知字段 review.${key}`);
-	const advisor = reviewModel(raw.advisor, "review.advisor", DEFAULT_ADVISOR, problems);
+	for (const key of REVIEW_KEYS)
+		if (!(key in raw)) problems.push(`review.${key} 必须显式配置`);
+	const advisor = reviewModel(raw.advisor, "review.advisor", EMPTY_REVIEW_MODEL, problems);
 	const reviewers = reviewModels(raw.reviewers, problems);
 	return {
 		advisor,
@@ -301,10 +289,10 @@ function reviewModel(
 function reviewModels(value: unknown, problems: string[]): ReviewModel[] {
 	if (!Array.isArray(value) || value.length === 0 || value.length > 5) {
 		if (value !== undefined) problems.push("review.reviewers 必须包含 1–5 个模型");
-		return [...DEFAULT_REVIEWERS];
+		return [];
 	}
 	return value.map((item, index) =>
-		reviewModel(item, `review.reviewers[${index}]`, DEFAULT_REVIEWERS[index] ?? DEFAULT_REVIEWERS[0], problems),
+		reviewModel(item, `review.reviewers[${index}]`, EMPTY_REVIEW_MODEL, problems),
 	);
 }
 
@@ -331,7 +319,8 @@ function reviewTools(value: unknown, problems: string[]): string[] {
 		return [...DEFAULT_TOOLS];
 	}
 	const tools = value.filter((item): item is string => typeof item === "string" && item.length > 0);
-	if (tools.length !== value.length) problems.push("review.tools 必须是字符串数组");
+	if (tools.length !== value.length || tools.length === 0)
+		problems.push("review.tools 必须是非空字符串数组");
 	return tools.length > 0 ? tools : [...DEFAULT_TOOLS];
 }
 
@@ -344,11 +333,11 @@ function reviewBackground(value: unknown, problems: string[]): string {
 	const record = asRecord(value);
 	rejectUnknownKeys(record, ["command"], "review.background", problems);
 	const command = record.command;
-	if (command !== undefined && (typeof command !== "string" || command.length === 0)) {
+	if (typeof command !== "string" || command.length === 0) {
 		problems.push("review.background.command 必须是非空字符串");
 		return "pi";
 	}
-	return typeof command === "string" ? command : "pi";
+	return command;
 }
 
 // ---- master 节 ----
@@ -357,10 +346,10 @@ function reviewBackground(value: unknown, problems: string[]): string {
 export function parseMasterConfig(raw: Record<string, unknown>, problems: string[]): MasterConfig {
 	for (const key of Object.keys(raw))
 		if (key !== "models") problems.push(`未知字段 master.${key}`);
-	if (raw.models === undefined) return { models: [...DEFAULT_MASTER_MODELS] };
+	if (raw.models === undefined) return { models: [] };
 	if (!Array.isArray(raw.models) || raw.models.length === 0 || raw.models.length > 8) {
 		problems.push("master.models 必须包含 1–8 个模型");
-		return { models: [...DEFAULT_MASTER_MODELS] };
+		return { models: [] };
 	}
 	const models = raw.models.map((item, index) => masterModel(item, `master.models[${index}]`, problems));
 	if (new Set(models.map((entry) => entry.model)).size !== models.length)

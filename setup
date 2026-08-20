@@ -18,6 +18,9 @@ WITH_HELIUM=0
 WITH_SEARCH=0
 MIGRATE_HERDR=0
 SELECTIONS=
+ARCHITECTURE_LANGUAGE=zh
+ARCHITECTURE_LANGUAGE_EXPLICIT=0
+MIGRATE_FIRECODE=0
 FORCE_UPDATE=0
 UPDATE_FORWARD_ARGS=()
 . "$ROOT/lib/workstation.sh"
@@ -26,7 +29,7 @@ usage() {
   printf '%s\n' '用法: setup [doctor|plan|apply|verify|update|repair|uninstall|configure-search] [选项]'
   printf '%s\n' '选项: --mode full|core|custom  --yes  --json  --replace-system|--keep-system'
   printf '%s\n' '      --with-bcu --with-browser --with-terminal --with-helium --with-search'
-  printf '%s\n' '      --selections <json>  --migrate-herdr  --dry-run'
+  printf '%s\n' '      --selections <json>  --architecture-language zh|en  --migrate-firecode  --migrate-herdr  --dry-run'
 }
 
 parse_options() {
@@ -44,6 +47,8 @@ parse_options() {
       --with-helium) WITH_HELIUM=1 ;;
       --with-search) WITH_SEARCH=1 ;;
       --migrate-herdr) MIGRATE_HERDR=1 ;;
+      --migrate-firecode) MIGRATE_FIRECODE=1 ;;
+      --architecture-language) shift; ARCHITECTURE_LANGUAGE=${1:-}; ARCHITECTURE_LANGUAGE_EXPLICIT=1 ;;
       --selections) shift; SELECTIONS=${1:-} ;;
       --dry-run) MYAW_DRY_RUN=1; export MYAW_DRY_RUN ;;
       *) printf '未知参数: %s\n' "$1" >&2; exit 64 ;;
@@ -51,6 +56,7 @@ parse_options() {
     shift
   done
   test "$REPLACE_SYSTEM" -eq 0 || test "$KEEP_SYSTEM" -eq 0 || { printf '%s\n' '--replace-system 与 --keep-system 不能同时使用' >&2; exit 64; }
+  case "$ARCHITECTURE_LANGUAGE" in zh|en) ;; *) printf '%s\n' '--architecture-language 只接受 zh 或 en' >&2; exit 64 ;; esac
   if test -n "$SELECTIONS" && test ! -f "$SELECTIONS"; then printf '模型选择文件不存在: %s\n' "$SELECTIONS" >&2; exit 64; fi
 }
 
@@ -390,6 +396,7 @@ is_valid() {
   test "$SERVICE_STATUS" = normal || return 1
   test "$INTEGRATION_STATUS" = normal || return 1
   test "$PACKAGE_STATUS" = normal || return 1
+  test "$ARCHITECTURE_STATUS" = normal || return 1
   if owns_component system; then test "$SYSTEM_STATUS" = normal || return 1; fi
   if test "$WITH_BCU" -eq 1; then test "$BCU_PERMISSION_STATUS" = normal || return 1; fi
   if test "$WITH_BROWSER" -eq 1; then test "$BROWSER_STATUS" = normal || return 1; fi
@@ -402,8 +409,8 @@ print_verify() {
   is_valid && valid=true
   if test "$JSON" -eq 1; then
     printf '{"valid":%s,"components":{' "$valid"
-    printf '"homebrew":"%s","node":"%s","pi":"%s","herdr":"%s","herdr_service":"%s","pi_integration":"%s","workstation_package":"%s"' \
-      "$HOMEBREW_STATUS" "$NODE_STATUS" "$PI_STATUS" "$HERDR_STATUS" "$SERVICE_STATUS" "$INTEGRATION_STATUS" "$PACKAGE_STATUS"
+    printf '"homebrew":"%s","node":"%s","pi":"%s","herdr":"%s","herdr_service":"%s","pi_integration":"%s","workstation_package":"%s","architecture_wiki":"%s"' \
+      "$HOMEBREW_STATUS" "$NODE_STATUS" "$PI_STATUS" "$HERDR_STATUS" "$SERVICE_STATUS" "$INTEGRATION_STATUS" "$PACKAGE_STATUS" "$ARCHITECTURE_STATUS"
     printf '}}\n'
   elif test "$valid" = true; then
     printf '验证通过：核心运行时与所选工作站组件均可用。\n'
@@ -421,7 +428,7 @@ write_state() {
   mkdir -p "$STATE_HOME"
   STATE_FILE="$STATE_HOME/state.json" INSTALLATION_ROOT="$RUNTIME_HOME" MODE_VALUE="$MODE" VERSION_VALUE="$WORKSTATION_VERSION" \
   WITH_BCU_VALUE="$WITH_BCU" WITH_BROWSER_VALUE="$WITH_BROWSER" WITH_TERMINAL_VALUE="$WITH_TERMINAL" WITH_HELIUM_VALUE="$WITH_HELIUM" \
-  node - <<'NODE'
+  ARCHITECTURE_LANGUAGE_VALUE="$ARCHITECTURE_LANGUAGE" node - <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
 const state = {
@@ -430,6 +437,7 @@ const state = {
   version: process.env.VERSION_VALUE,
   mode: process.env.MODE_VALUE,
   installation_root: process.env.INSTALLATION_ROOT,
+  architecture_language: process.env.ARCHITECTURE_LANGUAGE_VALUE,
   selected: {
     bcu: process.env.WITH_BCU_VALUE === "1",
     browser: process.env.WITH_BROWSER_VALUE === "1",
@@ -449,12 +457,13 @@ load_state_options() {
   value=$(STATE_FILE="$STATE_HOME/state.json" node -e '
     const s=JSON.parse(require("fs").readFileSync(process.env.STATE_FILE,"utf8"));
     const x=s.selected||{};
-    process.stdout.write([s.mode||"core",x.bcu?1:0,x.browser?1:0,x.terminal?1:0,x.helium?1:0].join(" "));
+    process.stdout.write([s.mode||"core",x.bcu?1:0,x.browser?1:0,x.terminal?1:0,x.helium?1:0,s.architecture_language||"zh"].join(" "));
   ' 2>/dev/null) || return 1
-  IFS=' ' read -r MODE WITH_BCU WITH_BROWSER WITH_TERMINAL WITH_HELIUM <<EOF
+  IFS=' ' read -r MODE WITH_BCU WITH_BROWSER WITH_TERMINAL WITH_HELIUM stored_architecture_language <<EOF
 $value
 EOF
   MODE=${MODE:-core}; WITH_BCU=${WITH_BCU:-0}; WITH_BROWSER=${WITH_BROWSER:-0}; WITH_TERMINAL=${WITH_TERMINAL:-0}; WITH_HELIUM=${WITH_HELIUM:-0}
+  if test "$ARCHITECTURE_LANGUAGE_EXPLICIT" -eq 0; then ARCHITECTURE_LANGUAGE=${stored_architecture_language:-zh}; fi
 }
 
 guard_apply() {
@@ -462,6 +471,10 @@ guard_apply() {
   if test "$NODE_STATUS" = conflict; then printf '%s\n' 'Node/npm 工具链不完整；请修复后重试。' >&2; return 3; fi
   if test "$PI_STATUS" = conflict && test "$PI_SOURCE" != homebrew && test "$PI_SOURCE" != npm+homebrew; then
     if test "$PI_SOURCE" = source; then printf '%s\n' '检测到源码 Pi；为避免覆盖已拒绝应用。' >&2; else printf '%s\n' 'npm Pi 命令不可用；请检查 PATH。' >&2; fi
+    return 3
+  fi
+  if test "$FIRECODE_STATUS" = independent && test "$MIGRATE_FIRECODE" -ne 1; then
+    printf '%s\n' '检测到独立 FireCode；请停止，或明确传入 --migrate-firecode 迁移为 Workstation 接管。' >&2
     return 3
   fi
   if test "$HERDR_STATUS" = conflict; then

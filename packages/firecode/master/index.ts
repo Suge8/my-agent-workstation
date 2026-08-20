@@ -2,7 +2,7 @@ import { realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { StringEnum, Type } from "@earendil-works/pi-ai";
 import { isToolCallEventType, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_MASTER_MODELS, loadConfig, type MasterModel } from "../config.js";
+import { loadConfig, type MasterModel } from "../config.js";
 import { ToolLine, makeResultRenderer } from "../tools/line.js";
 import type { Part } from "../tools/parts.js";
 import { registerMasterEventRenderer } from "./event-card.js";
@@ -59,7 +59,7 @@ type Runtime = MasterRuntime | WorkerRuntime;
 export function registerMaster(pi: ExtensionAPI): void {
 	let runtime: Runtime | undefined;
 	const masterModels = loadMasterModels();
-	const roster = "error" in masterModels ? DEFAULT_MASTER_MODELS : masterModels.models;
+	const roster = "error" in masterModels ? [] : masterModels.models;
 	const reviewGate = reviewGateError();
 	// 渲染器无条件注册（与 review 结果卡同策略）：live 与 reload 同一外观。
 	registerMasterEventRenderer(pi);
@@ -434,6 +434,8 @@ function loadMasterModels(): { models: MasterModel[] } | { error: string } {
 			problem.startsWith("features"),
 	);
 	if (problems.length > 0) return { error: `Master 配置有问题，已停止：${problems.join("；")}` };
+	if (loaded.config.master.models.length === 0)
+		return { error: "Master 配置有问题，已停止：请显式配置 master.models 选型表" };
 	return { models: loaded.config.master.models };
 }
 
