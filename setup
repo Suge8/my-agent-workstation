@@ -220,7 +220,7 @@ detect() {
   agent-browser --version >/dev/null 2>&1 && agent_browser=normal
   cloakbrowser info >/dev/null 2>&1 && cloak_browser=normal
   if test "$agent_browser" = normal && test "$cloak_browser" = normal; then
-    if test "$WITH_BROWSER" -eq 1 && { ! check_integrity browser || ! managed_block_is "$HOME/.zshrc" "$(shell_hook_body)"; }; then
+    if test "$WITH_BROWSER" -eq 1 && { ! check_integrity browser || ! check_integrity shell-init || ! managed_block_is "$HOME/.zshrc" "$(shell_hook_body)"; }; then
       BROWSER_STATUS=conflict
     else
       BROWSER_STATUS=normal
@@ -333,7 +333,7 @@ install_herdr_official() {
   : > "$STATE_HOME/herdr-official"
   # shellcheck disable=SC2016 # Write the expansion into the generated Zsh file.
   printf 'export PATH=%q:$PATH\n' "$HOME/.local/bin" > "$STATE_HOME/config/shell.d/path.zsh"
-  rebuild_shell_init
+  rebuild_shell_init || return
   ensure_shell_hook
   herdr --version >/dev/null
 }

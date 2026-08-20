@@ -72,7 +72,7 @@ workstation_detect() {
   if brew list --cask ghostty >/dev/null 2>&1 && brew list --cask font-maple-mono-nf >/dev/null 2>&1 &&
      brew list --versions starship >/dev/null 2>&1 && brew list --versions fastfetch >/dev/null 2>&1 &&
      brew list --versions zsh-autosuggestions >/dev/null 2>&1 && brew list --versions zsh-syntax-highlighting >/dev/null 2>&1 &&
-     check_integrity terminal &&
+     check_integrity terminal && check_integrity shell-init &&
      managed_block_is "$XDG_CONFIG_HOME/ghostty/config" "config-file = \"$STATE_HOME/config/ghostty.conf\"" &&
      managed_block_is "$HOME/.zshrc" "$(shell_hook_body)"; then TERMINAL_STATUS=normal; fi
   HELIUM_STATUS=missing
@@ -266,6 +266,7 @@ configure_pi() {
     --profile "$ROOT/resources/models/recommended.json" \
     --providers "$providers" \
     --available-models "$models" \
+    --ownership "$STATE_HOME/pi-managed.json" \
     --pi-settings "$PI_AGENT_HOME/settings.json" \
     --pi-keybindings "$PI_AGENT_HOME/keybindings.json" \
     --firecode "$PACKAGE_HOME/firecode/config.jsonc"
@@ -275,6 +276,20 @@ configure_pi() {
   if test -z "$providers" && test "$JSON" -eq 0; then
     printf '未检测到已认证模型；FireCode 模型能力保持关闭。请在 Pi 中运行 /login 后重试配置。\n' >&2
   fi
+}
+
+restore_pi_configuration() {
+  owns_component pi-settings || owns_component pi-keybindings || return 0
+  node "$ROOT/scripts/configure-workstation.mjs" \
+    --mode restore \
+    --ownership "$STATE_HOME/pi-managed.json" \
+    --pi-settings "$PI_AGENT_HOME/settings.json" \
+    --pi-keybindings "$PI_AGENT_HOME/keybindings.json" \
+    --pi-settings-backup "$BACKUP_HOME/pi-settings.json" \
+    --pi-keybindings-backup "$BACKUP_HOME/pi-keybindings.json" >/dev/null || return
+  retire_backup pi-settings.json || return
+  retire_backup pi-keybindings.json || return
+  rm -f "$OWNERSHIP_HOME/pi-settings" "$OWNERSHIP_HOME/pi-keybindings"
 }
 
 replace_system() {
@@ -315,6 +330,7 @@ rebuild_shell_init() {
     test -f "$fragment" || continue
     cat "$fragment" >> "$STATE_HOME/config/init.zsh"
   done
+  record_integrity shell-init "$STATE_HOME/config/init.zsh"
 }
 
 ensure_shell_hook() {
@@ -330,7 +346,7 @@ install_browser() {
   mkdir -p "$STATE_HOME/config/shell.d"
   printf 'export AGENT_BROWSER_EXECUTABLE_PATH=%q\nexport AGENT_BROWSER_NAMESPACE=my-agent-workstation\n' "$browser_path" > "$STATE_HOME/config/shell.d/browser.zsh"
   record_integrity browser "$STATE_HOME/config/shell.d/browser.zsh" || return
-  rebuild_shell_init
+  rebuild_shell_init || return
   ensure_shell_hook
 }
 
@@ -383,7 +399,7 @@ install_terminal() {
     "$STATE_HOME/config/fastfetch/config.jsonc" \
     "$STATE_HOME/config/zsh-plugins.zsh" \
     "$STATE_HOME/config/shell.d/terminal.zsh" || return
-  rebuild_shell_init
+  rebuild_shell_init || return
   append_managed_block "$XDG_CONFIG_HOME/ghostty/config" "config-file = \"$STATE_HOME/config/ghostty.conf\"" ghostty.config
   ensure_shell_hook
 }
@@ -458,14 +474,13 @@ workstation_uninstall() {
     retire_backup zshrc || return
   fi
   restore_owned_file "$PI_AGENT_HOME/SYSTEM.md" SYSTEM.md system || return
-  restore_owned_file "$PI_AGENT_HOME/settings.json" pi-settings.json pi-settings || return
-  restore_owned_file "$PI_AGENT_HOME/keybindings.json" pi-keybindings.json pi-keybindings || return
+  restore_pi_configuration || return
   restore_owned_file "$PI_AGENT_HOME/bark-key" bark-key bark || return
   if owns_component bcu; then
     npm uninstall --global better-computer-use >/dev/null 2>&1 || return
     rm -f "$OWNERSHIP_HOME/bcu"
   fi
-  rm -rf "$PACKAGE_HOME" "$STATE_HOME/config" "$RUNTIME_HOME" "$INTEGRITY_HOME" "$OWNERSHIP_HOME" "$STATE_HOME/system-installed.md" "$STATE_HOME/herdr-official"
+  rm -rf "$PACKAGE_HOME" "$STATE_HOME/config" "$RUNTIME_HOME" "$INTEGRITY_HOME" "$OWNERSHIP_HOME" "$STATE_HOME/pi-managed.json" "$STATE_HOME/system-installed.md" "$STATE_HOME/herdr-official"
   printf '{"schema":1,"status":"uninstalled","backups":"%s"}\n' "$BACKUP_HOME" > "$STATE_HOME/state.json"
 }
 

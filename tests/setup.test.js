@@ -250,8 +250,8 @@ describe("setup public CLI", () => {
     expect(after.split("pi install ").length).toBe(before.split("pi install ").length);
   });
 
-  test("managed Pi files are backed up, restored, and start a fresh backup cycle", () => {
-    const f = fixture(ready());
+  test("managed Pi fields are restored without deleting later unrelated changes", () => {
+    const f = fixture(ready({ "auth-openai-codex": "" }));
     const agent = join(f.home, ".pi", "agent");
     mkdirSync(agent, { recursive: true });
     writeFileSync(join(agent, "SYSTEM.md"), "original system\n");
@@ -260,10 +260,29 @@ describe("setup public CLI", () => {
     writeFileSync(join(agent, "bark-key"), "original bark\n");
     expect(apply(f, "core", ["--replace-system"]).status).toBe(0);
     expect(f.run(["configure-search"], "\n\nhttps://api.day.app/new/\n").status).toBe(0);
+    const settingsPath = join(agent, "settings.json");
+    const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+    settings.custom = "changed after install";
+    settings.addedAfterInstall = true;
+    settings.warnings.keepAfterInstall = true;
+    writeFileSync(settingsPath, `${JSON.stringify(settings)}\n`);
+    const keybindingsPath = join(agent, "keybindings.json");
+    const keybindings = JSON.parse(readFileSync(keybindingsPath, "utf8"));
+    keybindings.custom = "changed after install";
+    keybindings.addedAfterInstall = ["ctrl+x"];
+    keybindings["app.model.cycleForward"] = ["ctrl+m"];
+    writeFileSync(keybindingsPath, `${JSON.stringify(keybindings)}\n`);
     expect(f.run(["uninstall", "--yes", "--json"]).status).toBe(0);
     expect(readFileSync(join(agent, "SYSTEM.md"), "utf8")).toBe("original system\n");
-    expect(readFileSync(join(agent, "settings.json"), "utf8")).toBe('{"custom":"settings"}\n');
-    expect(readFileSync(join(agent, "keybindings.json"), "utf8")).toBe('{"custom":"keys"}\n');
+    expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({
+      custom: "changed after install",
+      addedAfterInstall: true,
+      warnings: { keepAfterInstall: true },
+    });
+    expect(JSON.parse(readFileSync(keybindingsPath, "utf8"))).toEqual({
+      custom: "changed after install",
+      addedAfterInstall: ["ctrl+x"],
+    });
     expect(readFileSync(join(agent, "bark-key"), "utf8")).toBe("original bark\n");
     writeFileSync(join(agent, "SYSTEM.md"), "second system\n");
     expect(apply(f, "core", ["--replace-system"]).status).toBe(0);
@@ -342,17 +361,25 @@ describe("setup public CLI", () => {
     const skill = join(f.managed, "pi-package", "skills", "operations", "workstation-setup", "SKILL.md");
     const terminal = join(f.managed, "config", "ghostty.conf");
     const orphan = join(f.managed, "pi-package", "orphan.txt");
+    const init = join(f.managed, "config", "init.zsh");
     const zshrc = join(f.home, ".zshrc");
     writeFileSync(skill, "corrupt\n");
     writeFileSync(terminal, "corrupt\n");
     writeFileSync(orphan, "orphan\n");
+    writeFileSync(init, "corrupt init\n");
     writeFileSync(zshrc, readFileSync(zshrc, "utf8").replace(/source .*init\.zsh/, "corrupt managed body"));
     const repaired = f.run(["repair", "--yes", "--json"]);
     expect(repaired.status).toBe(0, repaired.stderr);
     expect(readFileSync(skill, "utf8")).not.toBe("corrupt\n");
     expect(readFileSync(terminal, "utf8")).not.toBe("corrupt\n");
     expect(existsSync(orphan)).toBe(false);
+    expect(readFileSync(init, "utf8")).not.toBe("corrupt init\n");
+    expect(readFileSync(init, "utf8")).toContain("STARSHIP_CONFIG");
     expect(readFileSync(zshrc, "utf8")).toContain("source ");
+    writeFileSync(init, "corrupt init only\n");
+    expect(f.run(["verify", "--json"]).status).toBe(1);
+    expect(f.run(["repair", "--yes", "--json"]).status).toBe(0);
+    expect(readFileSync(init, "utf8")).toContain("STARSHIP_CONFIG");
   });
 
   test("update refreshes stable dependencies", () => {

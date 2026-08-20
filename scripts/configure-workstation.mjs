@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderModelProfile, parseJsonc } from "./render-model-profile.mjs";
@@ -13,9 +13,10 @@ function args(argv) {
 		if (!flag?.startsWith("--") || value === undefined) throw new Error(`参数无效：${flag ?? ""}`);
 		options[flag.slice(2)] = value;
 	}
-	for (const required of ["profile", "pi-settings", "pi-keybindings", "firecode"]) {
-		if (!options[required]) throw new Error(`缺少 --${required}`);
-	}
+	const required = options.mode === "restore"
+		? ["pi-settings", "pi-keybindings", "pi-settings-backup", "pi-keybindings-backup", "ownership"]
+		: ["profile", "pi-settings", "pi-keybindings", "firecode", "ownership"];
+	for (const name of required) if (!options[name]) throw new Error(`缺少 --${name}`);
 	return options;
 }
 
@@ -36,6 +37,54 @@ async function atomicJson(path, value) {
 	const temporary = `${path}.${process.pid}.tmp`;
 	await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
 	await rename(temporary, path);
+}
+
+async function writeRestored(path, value, absentBeforeInstall) {
+	if (absentBeforeInstall && Object.keys(value).length === 0) {
+		await rm(path, { force: true });
+		return;
+	}
+	await atomicJson(path, value);
+}
+
+function restoreKeys(current, baseline, keys) {
+	const restored = { ...current };
+	for (const key of keys) {
+		if (Object.hasOwn(baseline, key)) restored[key] = baseline[key];
+		else delete restored[key];
+	}
+	return restored;
+}
+
+function restoreSettings(current, baseline, managed) {
+	const topLevel = managed.filter((key) => !key.includes("."));
+	const restored = restoreKeys(current, baseline, topLevel);
+	if (managed.includes("warnings.anthropicExtraUsage")) {
+		const warnings = restoreKeys(restored.warnings ?? {}, baseline.warnings ?? {}, ["anthropicExtraUsage"]);
+		if (Object.keys(warnings).length) restored.warnings = warnings;
+		else delete restored.warnings;
+	}
+	return restored;
+}
+
+export async function restore(options) {
+	const settingsPath = resolve(options["pi-settings"]);
+	const keybindingsPath = resolve(options["pi-keybindings"]);
+	const settingsBackup = resolve(options["pi-settings-backup"]);
+	const keybindingsBackup = resolve(options["pi-keybindings-backup"]);
+	const [settings, keybindings, baselineSettings, baselineKeybindings, ownership] = await Promise.all([
+		readObject(settingsPath),
+		readObject(keybindingsPath),
+		readObject(settingsBackup),
+		readObject(keybindingsBackup),
+		readObject(resolve(options.ownership)),
+	]);
+	const restoredSettings = restoreSettings(settings, baselineSettings, ownership.settings ?? []);
+	const restoredKeybindings = restoreKeys(keybindings, baselineKeybindings, ownership.keybindings ?? []);
+	await Promise.all([
+		writeRestored(settingsPath, restoredSettings, existsSync(`${settingsBackup}.absent`)),
+		writeRestored(keybindingsPath, restoredKeybindings, existsSync(`${keybindingsBackup}.absent`)),
+	]);
 }
 
 function modelRef(model) {
@@ -108,10 +157,12 @@ export async function configure(options) {
 	const base = baseConfiguration(profile, providers, settings, keybindings, firecode);
 	base.firecode.features.bark = existsSync(resolve(dirname(settingsPath), "bark-key"));
 	let rendered = base;
+	let managesModels = false;
 	if (providers.length && available.length) {
 		const selections = automaticSelections(profile, providers, available, supplied);
 		const defaultDisabled = selections.models?.[profile.default] === null && !selections.default;
 		if (!defaultDisabled) {
+			managesModels = true;
 			rendered = renderModelProfile({
 				profile,
 				authenticatedProviders: providers,
@@ -123,17 +174,29 @@ export async function configure(options) {
 			});
 		}
 	}
+	const ownershipPath = resolve(options.ownership);
+	const previousOwnership = await readObject(ownershipPath);
+	const managedSettings = new Set(previousOwnership.settings ?? []);
+	managedSettings.add("warnings.anthropicExtraUsage");
+	if (managesModels) {
+		for (const key of ["defaultProvider", "defaultModel", "defaultThinkingLevel", "enabledModels"]) managedSettings.add(key);
+	}
+	const managedKeybindings = new Set(previousOwnership.keybindings ?? []);
+	for (const key of Object.keys(profile.keybindings)) managedKeybindings.add(key);
 	await Promise.all([
 		atomicJson(settingsPath, rendered.piSettings),
 		atomicJson(keybindingsPath, rendered.piKeybindings),
 		atomicJson(firecodePath, rendered.firecode),
+		atomicJson(ownershipPath, { settings: [...managedSettings], keybindings: [...managedKeybindings] }),
 	]);
 	return { configuredModels: rendered.piSettings.enabledModels?.length ?? 0, providers };
 }
 
 if (process.argv[1] && resolve(fileURLToPath(import.meta.url)) === resolve(process.argv[1])) {
-	configure(args(process.argv.slice(2)))
-		.then((result) => process.stdout.write(`${JSON.stringify(result)}\n`))
+	const options = args(process.argv.slice(2));
+	const operation = options.mode === "restore" ? restore(options) : configure(options);
+	operation
+		.then((result) => process.stdout.write(`${JSON.stringify(result ?? { restored: true })}\n`))
 		.catch((error) => {
 			process.stderr.write(`${error.message}\n`);
 			process.exitCode = 1;
