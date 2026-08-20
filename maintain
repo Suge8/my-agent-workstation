@@ -8,7 +8,7 @@ case "$command" in
     shift
     node "$ROOT/scripts/sync-sources.mjs" "$@"
     cd "$ROOT"
-    bun run test
+    bun run test:sync
     bun run check:shell
     ;;
   *)

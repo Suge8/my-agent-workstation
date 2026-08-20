@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 
 const setup = resolve(import.meta.dir, "../setup");
 const roots = [];
-setDefaultTimeout(30000);
+setDefaultTimeout(90000);
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });

@@ -58,7 +58,7 @@ curl -fsSL https://raw.githubusercontent.com/Suge8/my-agent-workstation/main/ins
 ./maintain sync
 ```
 
-该命令从 `$HOME` 下的标准位置同步 FireCode、现役 Skills 和 SYSTEM，清除私人路径与排除项，然后运行项目测试。需要时可用 `--firecode`、`--skills` 和 `--system` 指定其他维护源。它不会提交、打标签、推送或发布。
+该命令从 `$HOME` 下的标准位置同步 FireCode、现役 Skills 和 SYSTEM，清除私人路径与排除项，然后运行受影响的资产与 FireCode 测试。需要时可用 `--firecode`、`--skills` 和 `--system` 指定其他维护源。它不会提交、打标签、推送或发布。
 
 ## 开发验证
 

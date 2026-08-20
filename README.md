@@ -58,7 +58,7 @@ Uninstall removes only content owned by this workstation. Package-manager tools 
 ./maintain sync
 ```
 
-This copies FireCode, active Skills, and SYSTEM from their standard locations under `$HOME`, removes private paths and excluded material, then runs the project tests. Optional `--firecode`, `--skills`, and `--system` paths override the defaults. It never commits, tags, pushes, or publishes.
+This copies FireCode, active Skills, and SYSTEM from their standard locations under `$HOME`, removes private paths and excluded material, then runs the affected asset and FireCode tests. Optional `--firecode`, `--skills`, and `--system` paths override the defaults. It never commits, tags, pushes, or publishes.
 
 ## Develop
 
