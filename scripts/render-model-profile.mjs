@@ -40,6 +40,7 @@ function withoutModelFields(section, fields) {
 export function renderModelProfile({
   profile,
   authenticatedProviders,
+  availableModels,
   selections = {},
   piSettings = {},
   piKeybindings = {},
@@ -50,6 +51,13 @@ export function renderModelProfile({
   object(selections, "用户选择");
   object(selections.models ?? {}, "用户选择 models");
   const authenticated = new Set(authenticatedProviders ?? []);
+  if (!Array.isArray(availableModels)) throw new Error("availableModels 必须是当前 Pi 可用模型数组");
+  const available = new Set(availableModels.map((value) => modelRef(value, "可用模型").ref));
+  const acceptModel = (model) => {
+    if (!authenticated.has(model.provider)) throw new Error(`provider ${model.provider} 未认证，拒绝使用 ${model.ref}`);
+    if (!available.has(model.ref)) throw new Error(`模型 ${model.ref} 不在当前 Pi 可用模型目录中`);
+    return model;
+  };
   const disabled = new Set(selections.disabled ?? []);
   for (const capability of disabled) {
     if (!CAPABILITIES.has(capability)) throw new Error(`未知能力：${capability}`);
@@ -67,9 +75,7 @@ export function renderModelProfile({
       resolved.set(alias, null);
       continue;
     }
-    const model = modelRef(chosen, `模型选择 ${alias}`);
-    if (!authenticated.has(model.provider)) throw new Error(`provider ${model.provider} 未认证，拒绝使用 ${model.ref}`);
-    resolved.set(alias, model);
+    resolved.set(alias, acceptModel(modelRef(chosen, `模型选择 ${alias}`)));
   }
 
   const resolveAlias = (alias) => {
@@ -80,9 +86,7 @@ export function renderModelProfile({
     ? modelRef(selections.default, "默认模型")
     : resolveAlias(profile.default);
   if (!selectedDefault) throw new Error(`默认模型 ${profile.default} 已禁用，请显式选择替代模型`);
-  if (!authenticated.has(selectedDefault.provider)) {
-    throw new Error(`provider ${selectedDefault.provider} 未认证，拒绝使用 ${selectedDefault.ref}`);
-  }
+  acceptModel(selectedDefault);
 
   const cycle = unique([selectedDefault, ...profile.cycle.map(resolveAlias).filter(Boolean)], (item) => item.ref);
   const settings = {
@@ -102,15 +106,24 @@ export function renderModelProfile({
 
   const currentFirecode = object(firecode, "FireCode config");
   const features = { ...object(currentFirecode.features ?? {}, "FireCode features") };
+  const currentPresets = object(currentFirecode.presets ?? {}, "FireCode presets");
+  const managedPresets = new Set(Object.keys(profile.presets));
   const presets = {};
+  for (const [name, preset] of Object.entries(currentPresets)) {
+    if (managedPresets.has(name)) continue;
+    const custom = object(preset, `FireCode preset ${name}`);
+    if (typeof custom.provider === "string" && typeof custom.model === "string") {
+      acceptModel(modelRef(`${custom.provider}/${custom.model}`, `FireCode preset ${name}`));
+    }
+    presets[name] = custom;
+  }
   if (!disabled.has("presets")) {
     for (const [name, preset] of Object.entries(profile.presets)) {
       const model = resolveAlias(preset.model);
       if (model) presets[name] = { ...preset, provider: model.provider, model: model.model };
-      if (model) delete presets[name].modelAlias;
     }
   }
-  features.presets = Object.keys(presets).length > 0;
+  features.presets = !disabled.has("presets") && Object.keys(presets).length > 0;
 
   const masterModels = disabled.has("master")
     ? []
@@ -200,7 +213,7 @@ function parseArgs(argv) {
   const options = {};
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
-    if (!["--providers", "--selections", "--profile", "--pi-settings", "--pi-keybindings", "--firecode"].includes(flag)) {
+    if (!["--providers", "--available-models", "--selections", "--profile", "--pi-settings", "--pi-keybindings", "--firecode"].includes(flag)) {
       throw new Error(`未知参数：${flag}`);
     }
     const value = argv[++index];
@@ -208,6 +221,7 @@ function parseArgs(argv) {
     options[flag.slice(2)] = value;
   }
   if (!options.providers) throw new Error("必须提供 --providers provider,...");
+  if (!options["available-models"]) throw new Error("必须提供 --available-models provider/model,...");
   return options;
 }
 
@@ -229,6 +243,7 @@ export async function run(argv = process.argv.slice(2)) {
   const rendered = renderModelProfile({
     profile,
     authenticatedProviders: options.providers.split(",").filter(Boolean),
+    availableModels: options["available-models"].split(",").filter(Boolean),
     selections,
     piSettings,
     piKeybindings,
@@ -242,7 +257,7 @@ export async function run(argv = process.argv.slice(2)) {
   process.stdout.write(`${JSON.stringify(rendered, null, 2)}\n`);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   run().catch((error) => {
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 1;
