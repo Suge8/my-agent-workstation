@@ -1,5 +1,5 @@
 // Generated flame frame asset for pi-flow activity boxes.
-// Bundled activity-frame asset.
+// Source: <HOME>/.pi/agent/extensions/working-style.ts FRAMES.
 
 const FRAMES = [
 	[

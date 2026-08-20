@@ -10,7 +10,7 @@ test("recognizes a native compaction checkpoint", () => {
 		strategy: NATIVE_COMPACTION_STRATEGY,
 		provider: "openai-codex",
 		api: "openai-codex-responses",
-		model: "gpt-4.1",
+		model: "gpt-5.6-sol",
 		baseUrl: "https://chatgpt.com/backend-api",
 		compactedWindow: [{ type: "compaction", encrypted_content: "opaque" }],
 		createdAt: "2026-07-12T00:00:00.000Z",
@@ -30,7 +30,7 @@ test("recognizes a native compaction checkpoint", () => {
 		resolveLatestNativeCompaction([entry] as never, {
 			provider: "openai-codex",
 			api: "openai-codex-responses",
-			model: "gpt-4.1",
+			model: "gpt-5.6-sol",
 			baseUrl: "https://chatgpt.com/backend-api",
 		}),
 	).toMatchObject({ ok: true, entry: { id: "compact_existing" } });
@@ -42,7 +42,7 @@ test("rejects an invalid persisted compacted window", () => {
 			strategy: NATIVE_COMPACTION_STRATEGY,
 			provider: "openai",
 			api: "openai-responses",
-			model: "gpt-4.1",
+			model: "gpt-5.6-sol",
 			baseUrl: "https://api.openai.com/v1",
 			compactedWindow: ["not an OpenAI Responses item"],
 			createdAt: "2026-07-12T00:00:00.000Z",

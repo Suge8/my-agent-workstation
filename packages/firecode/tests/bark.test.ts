@@ -6,7 +6,7 @@ import { buildBarkPayload, hasBlockedWorker } from "../session/bark.js";
 
 const worker = (status: string) => ({
 	name: "w1",
-	model: "openai-codex/gpt-4.1",
+	model: "openai-codex/gpt-5.6-sol",
 	thinking: "medium",
 	status,
 	paneId: "p1",

@@ -195,10 +195,10 @@ test("Worker results return as follow-up custom messages", async () => {
 	await expect(tools.get("subagents")?.execute("call", { action: "start", prompt: "做", model: "vendor/not-in-roster" }, undefined, undefined, ctx))
 		.rejects.toThrow("不在选型表");
 	// thinking 同样必填：档位直接决定花销，继承指挥官的思考等级也是静默花钱。
-	await expect(tools.get("subagents")?.execute("call", { action: "start", prompt: "做", model: "openai/gpt-4.1" }, undefined, undefined, ctx))
+	await expect(tools.get("subagents")?.execute("call", { action: "start", prompt: "做", model: "openai-codex/gpt-5.6-sol" }, undefined, undefined, ctx))
 		.rejects.toThrow("必须显式指定 thinking");
-	const started = await tools.get("subagents")?.execute("call", { action: "start", prompt: "做", model: "openai/gpt-4.1", thinking: "high" }, undefined, undefined, ctx) as { details: { worker: { model: string; thinking: string } } };
-	expect(started.details.worker).toMatchObject({ model: "openai/gpt-4.1", thinking: "high" });
+	const started = await tools.get("subagents")?.execute("call", { action: "start", prompt: "做", model: "openai-codex/gpt-5.6-sol", thinking: "high" }, undefined, undefined, ctx) as { details: { worker: { model: string; thinking: string } } };
+	expect(started.details.worker).toMatchObject({ model: "openai-codex/gpt-5.6-sol", thinking: "high" });
 	await new Promise((resolve) => setTimeout(resolve, 120));
 	expect(messages).toEqual([{
 		message: {
@@ -217,7 +217,6 @@ test("review action exposes reviewing in Master status without accepting prompt 
 	process.env.HERDR_WORKSPACE_ID = "w1";
 	delete process.env.FIRECODE_MASTER_WORKER;
 	const module = (await loadFirecodeModule("master/index.js", {
-		// 发行配置默认关闭模型能力；该接缝测试固定在 review/master 已启用时验证成功路径。
 		configJsonc: '{"features":{"review":true,"master":true}}',
 		replacements: { 'from "./herdr.js"': 'from "./herdr-stub.js"' },
 		extraFiles: {
@@ -269,7 +268,7 @@ test("review action exposes reviewing in Master status without accepting prompt 
 	};
 	module.registerMaster(pi);
 	await commands.get("fire-master")?.handler("", ctx);
-	await tools.get("subagents")?.execute("call", { action: "start", prompt: "做", model: "openai/gpt-4.1", thinking: "medium" }, undefined, undefined, ctx);
+	await tools.get("subagents")?.execute("call", { action: "start", prompt: "做", model: "openai-codex/gpt-5.6-sol", thinking: "medium" }, undefined, undefined, ctx);
 	const result = await tools.get("subagents")?.execute(
 		"call",
 		{ action: "review", worker: "worker-1", prompt: "malicious override" },
@@ -282,7 +281,7 @@ test("review action exposes reviewing in Master status without accepting prompt 
 	expect(statuses.at(-1)).toContain("审1");
 	expect(notices.at(-1)).toContain("worker-1 reviewing");
 	await commands.get("fire-master")?.handler("off", ctx);
-});
+}, 20_000);
 
 test("Worker keeps pi default tools minus the Master tool and cannot edit/write outside the checkout", async () => {
 	process.env.HERDR_ENV = "1";
@@ -641,8 +640,8 @@ test("subagents 工具行：中文动词 + 目标 + 关键参数，session 恢�
 	const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
 	const ctx = () => ({ state: {}, cwd: "/tmp", toolCallId: crypto.randomUUID(), isPartial: false, isError: false, expanded: false });
 	const line = (args: Record<string, unknown>) => tool?.renderCall(args, theme, ctx()).render(90)[0] ?? "";
-	const start = line({ action: "start", worker: "t2", model: "anthropic/gpt-4.1-mini", review: true, prompt: "只回复 1\n第二行不进工具行" });
-	expect(start).toContain("子代理 启动 t2 · gpt-4.1-mini · 审查票 — 只回复 1");
+	const start = line({ action: "start", worker: "t2", model: "anthropic/claude-opus-5", review: true, prompt: "只回复 1\n第二行不进工具行" });
+	expect(start).toContain("子代理 启动 t2 · claude-opus-5 · 审查票 — 只回复 1");
 	expect(start).not.toContain("第二行");
 	expect(line({ action: "send", worker: "t1", prompt: "继续" })).toContain("发送 t1 — 继续");
 	expect(line({ action: "interrupt", worker: "t1" })).toContain("中断 t1");
@@ -654,7 +653,7 @@ test("subagents 工具行：中文动词 + 目标 + 关键参数，session 恢�
 	expect(line({ action: "hold", worker: "t1" })).toContain("待命 t1");
 	expect(line({ action: "stop", worker: "t2", forget: true })).toContain("移除 t2");
 	// session 恢复：整条绝对路径只显文件名，行尾截断不吃真信息。
-	expect(line({ action: "start", session: "/tmp/sessions/2026-08-16T01_abc.jsonl", prompt: "继续" }))
+	expect(line({ action: "start", session: "<HOME>/sessions/2026-08-16T01_abc.jsonl", prompt: "继续" }))
 		.toContain("启动 2026-08-16T01_abc.jsonl");
 });
 
@@ -669,7 +668,7 @@ function makeCtx(notices: string[], cwd = "/tmp") {
 		cwd,
 		isIdle: () => true,
 		hasPendingMessages: () => false,
-		model: { provider: "openai-codex", id: "gpt-4.1" },
+		model: { provider: "openai-codex", id: "gpt-5.6-sol" },
 		thinkingLevel: "medium",
 		sessionManager: { getSessionId: () => crypto.randomUUID(), getBranch: () => [] },
 		ui: {

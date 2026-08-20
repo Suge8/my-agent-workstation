@@ -316,7 +316,7 @@ describe("registerReview wiring", () => {
 		expect(readCheckpoint({ sessionManager })?.phase).toBe("settled");
 		expect(registered.emitted).toEqual([OCCUPIED, RELEASED]);
 		await rm(script, { force: true });
-	}, 20_000);
+	});
 
 	test("a pass runs a summary turn: prompt delivered, occupancy held until the turn ends", async () => {
 		const verdict = "PASS\n验证命令 exit 0。\n证据：文件=a.ts；命令=bun test";
@@ -356,7 +356,7 @@ describe("registerReview wiring", () => {
 		expect(readCheckpoint({ sessionManager })?.summary ?? null).toBeNull();
 		expect(registered.emitted).toEqual([OCCUPIED, RELEASED]);
 		await rm(script, { force: true });
-	}, 20_000);
+	});
 
 	test("releases Herdr occupancy when max rounds stops the review", async () => {
 		const { registerReview, readCheckpoint, script } = await loadReviewWithVerdict(FAIL_VERDICT, 1);
@@ -376,7 +376,7 @@ describe("registerReview wiring", () => {
 		expect(readCheckpoint({ sessionManager })?.history.at(-1)?.result).toBe("failed");
 		expect(registered.emitted).toEqual([OCCUPIED, RELEASED]);
 		await rm(script, { force: true });
-	}, 20_000);
+	});
 
 	test("an occupancy signal failure does not stop the review", async () => {
 		await loadAll();
@@ -1101,7 +1101,7 @@ describe("the loop survives failing side effects", () => {
 		).toBe(true);
 		expect(readCheckpoint({ sessionManager })?.phase).toBe("settled");
 		await rm(script, { force: true });
-	}, 25_000);
+	}, 15_000);
 
 	test("a synchronous feedback failure cancels without dispatchQueue self-deadlock", async () => {
 		const { registerReview, readCheckpoint, script } = await loadSingleFailReview();
@@ -1123,7 +1123,7 @@ describe("the loop survives failing side effects", () => {
 		}
 		expect(readCheckpoint({ sessionManager })?.phase).toBe("settled");
 		await rm(script, { force: true });
-	}, 20_000);
+	});
 
 	// 持久化失败不能被当成成功继续，否则会拿不一致的状态起子进程、投反馈。
 	test("a checkpoint write failure stops the review instead of pressing on", async () => {

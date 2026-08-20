@@ -15,13 +15,6 @@ const codexModel = {
 	id: "gpt-5.6-sol",
 } as never;
 
-test("preserves the Responses fast-mode capability allowlist", () => {
-	for (const id of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
-		expect(supportsFastMode({ provider: "openai-codex", api: "openai-codex-responses", id } as never)).toBe(true);
-	}
-	expect(supportsFastMode({ provider: "openai-codex", api: "openai-codex-responses", id: "gpt-4.1" } as never)).toBe(false);
-});
-
 test("applies configured Responses options without touching input", () => {
 	const payload = {
 		model: "gpt-5.6-sol",

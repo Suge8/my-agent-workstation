@@ -43,7 +43,7 @@ function createRuntime(overrides: Partial<NativeCompactionRuntime> = {}): Native
 		api: "openai-responses",
 		model: baseModel.id,
 		baseUrl: baseModel.baseUrl,
-		apiKey: "fixture-key",
+		apiKey: "sk-test",
 		responsesUrl: "https://api.openai.com/v1/responses",
 		currentModel: baseModel,
 		...overrides,

@@ -23,7 +23,7 @@ function createContext(args: {
 				args.getApiKeyAndHeaders ??
 				(async () => ({
 					ok: true,
-					apiKey: "fixture-key",
+					apiKey: "sk-openai",
 					headers: { "x-test-request-header": "present" },
 				})),
 		},
@@ -104,7 +104,7 @@ describe("native compaction runtime", () => {
 				authCalls += 1;
 				return {
 					ok: true,
-					apiKey: "fixture-key",
+					apiKey: "sk-openai",
 					headers: { "x-test-request-header": "present" },
 				};
 			},
@@ -120,7 +120,7 @@ describe("native compaction runtime", () => {
 		expect(runtime).toEqual({
 			ok: true,
 			runtime: expect.objectContaining({
-				apiKey: "fixture-key",
+				apiKey: "sk-openai",
 				headers: { "x-test-request-header": "present" },
 			}),
 		});
@@ -145,7 +145,7 @@ describe("native compaction runtime", () => {
 		const target = resolveNativeCompactionTarget(
 			createContext({
 				provider: "custom-litellm",
-				baseUrl: "https://api.example.test/v1",
+				baseUrl: "https://proxy.example.com/v1",
 			}),
 		);
 

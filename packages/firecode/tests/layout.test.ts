@@ -25,8 +25,8 @@ const {
 
 const separator = " ｜";
 const status = {
-	model: "🧠 gpt-4.1/max · ⚡fast",
-	modelCompact: "🧠 gpt-4.1/max",
+	model: "🧠 gpt-5.6-sol/max · ⚡fast",
+	modelCompact: "🧠 gpt-5.6-sol/max",
 	quota: "",
 	quotaCompact: "",
 	context: "📦 12.4%/272k",
@@ -55,7 +55,7 @@ describe("two-line footer layout", () => {
 			),
 		).toBe("📍.pi · 🌿 main ｜💬 Footer 改版");
 		expect(fitStatusLine(status, 120, separator)).toBe(
-			"🧠 gpt-4.1/max · ⚡fast ｜📦 12.4%/272k ｜♻️ 98% ｜↗ 42t/s",
+			"🧠 gpt-5.6-sol/max · ⚡fast ｜📦 12.4%/272k ｜♻️ 98% ｜↗ 42t/s",
 		);
 	});
 
@@ -82,7 +82,7 @@ describe("two-line footer layout", () => {
 
 	test("still supports quota segments when they are supplied", () => {
 		expect(fitStatusLine(statusWithQuota, 140, separator)).toBe(
-			"🧠 gpt-4.1/max · ⚡fast ｜🔋 5h 26%/7d 88% ｜📦 12.4%/272k ｜♻️ 98% ｜↗ 42t/s",
+			"🧠 gpt-5.6-sol/max · ⚡fast ｜🔋 5h 26%/7d 88% ｜📦 12.4%/272k ｜♻️ 98% ｜↗ 42t/s",
 		);
 	});
 

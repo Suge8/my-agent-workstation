@@ -111,11 +111,11 @@ python3 ../scripts/fish_tts.py \
 
 | 路线 | 适用 | 栈 |
 |---|---|---|
-| **A · Remotion 纯代码** | 数据图表、UI/产品演示、几何系统 | 当前视频项目 + 编辑组件集 |
+| **A · Remotion 纯代码** | 数据图表、UI/产品演示、几何系统 | content-create + 编辑组件集 |
 | **B · 编辑拼贴** | 人物、历史、文化、情绪、品牌叙事 | gpt-image 造素材 → Remotion 驱动，读 `references/director/editorial-collage.md` |
 | **C · 模型直出** | 用户点名要实拍质感短片 | `references/model-generation.md`（Grok/Seedance） |
 
-A、B 共享同一引擎：当前视频项目，编辑感组件集在
+A、B 共享同一引擎：源项目 `<VIDEO_PROJECT>`，编辑感组件集在
 `src/editorial/`（PaperField / PhotoCutout / TornReveal / MarkerStroke / TapeLabel /
 EditorialChart / EvidenceFrame / CameraStage + `useStepped` 步进运动）。
 写 composition 前加载并遵循 `references/remotion.md`。路线 B 中个别镜头需要有机微动
@@ -123,7 +123,7 @@ EditorialChart / EvidenceFrame / CameraStage + `useStepped` 步进运动）。
 
 如果用户要求完整制作，继续进入制作，而不是停在方案：
 
-- 在当前视频项目根目录实现（已有项目则直接改，勿重复脚手架）
+- 在 `<VIDEO_PROJECT>` 实现（已有项目则直接改，勿重复脚手架）
 - 渲染：`npx remotion render <CompositionId> out/<name>.mp4`
 - contact sheet / 静帧：`npx remotion still ...` 或抽帧，产物放同项目 `out/` 与可选 `质检/`
 

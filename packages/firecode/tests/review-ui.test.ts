@@ -7,7 +7,7 @@ async function loadProgress(): Promise<Progress> {
 	return (await loadFirecodeModule("review/progress.js")) as Progress;
 }
 
-const reviewers = [{ model: "openai-codex/gpt-4.1" }, { model: "openai-codex/gpt-4.1-mini" }];
+const reviewers = [{ model: "openai-codex/gpt-5.6-sol" }, { model: "openai-codex/gpt-5.6-luna" }];
 
 afterEach(cleanupFirecodeModules);
 
@@ -15,7 +15,7 @@ describe("reviewer progress derived from subprocess events", () => {
 	test("starts every reviewer as running with a readable label", async () => {
 		const { initialProgress } = await loadProgress();
 		const progress = initialProgress(reviewers, "zh");
-		expect(progress.map((item) => item.label)).toEqual(["gpt-4.1", "gpt-4.1-mini"]);
+		expect(progress.map((item) => item.label)).toEqual(["gpt-5.6-sol", "gpt-5.6-luna"]);
 		expect(progress.every((item) => item.status === "running")).toBe(true);
 		expect(progress[0].action).toBe("思考中");
 	});
@@ -122,10 +122,10 @@ describe("review activity layout", () => {
 				advisorRunning: false,
 				language: "zh",
 				reviewers: [
-					{ index: 0, label: "gpt-4.1", status: "running", action: "读 review/state.ts", toolCalls: 2, trail: [], startedAt: Date.now() - 96_000 },
+					{ index: 0, label: "gpt-5.6-sol", status: "running", action: "读 review/state.ts", toolCalls: 2, trail: [], startedAt: Date.now() - 96_000 },
 					{
 						index: 1,
-						label: "gpt-4.1-nano",
+						label: "gpt-5.6-terra",
 						status: "failed",
 						action: "发现问题",
 						summary: "审查未通过",
@@ -144,9 +144,9 @@ describe("review activity layout", () => {
 		const output = lines.join("\n");
 		expect(output).toContain("🔥 审查中");
 		// 运行中模型带自己的耗时；未设 startedAt 的其他 fixture 不显示。
-		expect(output).toMatch(/gpt-4\.1 · 2 次调用 · 1m3\ds/u);
+		expect(output).toMatch(/gpt-5\.6-sol · 2 次调用 · 1m3\ds/u);
 		expect(output).toContain("读 review/state");
-		expect(output).toContain("❌ gpt-4.1-nano");
+		expect(output).toContain("❌ gpt-5.6-terra");
 		expect(output).toContain("[高] 结算态丢失完整结果");
 		expect(output).toContain("Esc/Ctrl+C 取消");
 		expect(lines[0].replace(/\x1b\[[0-9;]*m/gu, "")).toBe("─".repeat(100));
@@ -204,7 +204,7 @@ describe("review activity layout", () => {
 					advisorRunning: false,
 					language: "zh",
 					progressKind,
-					reviewers: [{ index: 0, label: "gpt-4.1", status: "passed", action: "通过", summary, toolCalls: 1, trail: [] }],
+					reviewers: [{ index: 0, label: "claude-fable-5", status: "passed", action: "通过", summary, toolCalls: 1, trail: [] }],
 				}),
 			);
 			const component = factory?.({ requestRender: () => {} }, { fg: (_tone: string, text: string) => text });
@@ -235,7 +235,7 @@ describe("review activity layout", () => {
 				consecutiveFailures: 2,
 				reviewers: [{
 					index: 0,
-					label: "gpt-4.1",
+					label: "claude-fable-5",
 					status: "running",
 					action: "跑 bun test tests/review-ui.test.ts",
 					toolCalls: 2,
@@ -250,7 +250,7 @@ describe("review activity layout", () => {
 		);
 		const output = (component?.render(80) ?? []).join("\n");
 		expect(output).toContain("🔥 顾问介入中 · 连续 2 轮未过");
-		expect(output).toContain("顾问 gpt-4.1 · 2 次调用");
+		expect(output).toContain("顾问 claude-fable-5 · 2 次调用");
 		// 动作按时间顺序滚动：旧在上新在下，不标当前/历史。
 		expect(output).toContain("↳ 读 state.ts");
 		expect(output).toContain("↳ 跑 bun test");
@@ -276,7 +276,7 @@ describe("review activity layout", () => {
 				reviewers: [
 					{
 						index: 0,
-						label: "gpt-4.1-nano",
+						label: "gpt-5.6-terra",
 						status: "passed",
 						action: "通过",
 						summary: "核心逻辑与测试已通过",
@@ -286,7 +286,7 @@ describe("review activity layout", () => {
 					},
 					{
 						index: 1,
-						label: "gpt-4.1",
+						label: "gpt-5.6-sol",
 						status: "failed",
 						action: "发现问题",
 						summary: "未通过",
@@ -303,11 +303,11 @@ describe("review activity layout", () => {
 		);
 		const output = (component?.render(80) ?? []).join("\n");
 		// PASS 保留核心摘要，同时附带建议
-		expect(output).toContain("✅ gpt-4.1-nano");
+		expect(output).toContain("✅ gpt-5.6-terra");
 		expect(output).toContain("核心逻辑与测试已通过");
 		expect(output).toContain("建议：可为边界场景补充单测");
 		// FAIL 展示标题与问题正文
-		expect(output).toContain("❌ gpt-4.1");
+		expect(output).toContain("❌ gpt-5.6-sol");
 		expect(output).toContain("[高] 结算态丢失完整结果");
 		expect(output).toContain("问题: 大屏仍只显示标题");
 		component?.dispose();
@@ -404,9 +404,9 @@ describe("review activity layout", () => {
 				advisorRunning: false,
 				language: "zh",
 				reviewers: [
-					{ index: 0, label: "gpt-4.1", status: "running", action: "读 state.ts", toolCalls: 1, trail: [] },
-					{ index: 1, label: "gpt-4.1-nano", status: "running", action: "跑测试", toolCalls: 1, trail: [] },
-					{ index: 2, label: "gpt-4.1-mini", status: "passed", action: "通过", toolCalls: 1, trail: [] },
+					{ index: 0, label: "gpt-5.6-sol", status: "running", action: "读 state.ts", toolCalls: 1, trail: [] },
+					{ index: 1, label: "gpt-5.6-terra", status: "running", action: "跑测试", toolCalls: 1, trail: [] },
+					{ index: 2, label: "gpt-5.6-luna", status: "passed", action: "通过", toolCalls: 1, trail: [] },
 					{ index: 3, label: "claude-3-7-sonnet", status: "running", action: "读 index.ts", toolCalls: 1, trail: [] },
 					{ index: 4, label: "gemini-2.5-pro", status: "passed", action: "通过", toolCalls: 1, trail: [] },
 				],
@@ -420,7 +420,9 @@ describe("review activity layout", () => {
 		// 4 * 0.7 = 2 行
 		expect(lines.length).toBeLessThanOrEqual(Math.floor(4 * 0.7));
 		const output = lines.join("\n");
-		expect(output).toContain("gpt-4.1");
+		expect(output).toContain("sol");
+		expect(output).toContain("terra");
+		expect(output).toContain("luna");
 		expect(output).toContain("c37");
 		expect(output).toContain("g25");
 		component?.dispose();
@@ -531,9 +533,9 @@ describe("review activity layout", () => {
 				advisorRunning: false,
 				language: "zh",
 				reviewers: [
-					{ index: 0, label: "gpt-4.1", status: "failed", summary: "未通过", details: ["[高] 发现 1", "问题: 说明 1"], toolCalls: 1, trail: [] },
-					{ index: 1, label: "gpt-4.1-nano", status: "failed", summary: "未通过", details: ["[高] 发现 2", "问题: 说明 2"], toolCalls: 1, trail: [] },
-					{ index: 2, label: "gpt-4.1-mini", status: "failed", summary: "未通过", details: ["[高] 发现 3", "问题: 说明 3"], toolCalls: 1, trail: [] },
+					{ index: 0, label: "gpt-5.6-sol", status: "failed", summary: "未通过", details: ["[高] 发现 1", "问题: 说明 1"], toolCalls: 1, trail: [] },
+					{ index: 1, label: "gpt-5.6-terra", status: "failed", summary: "未通过", details: ["[高] 发现 2", "问题: 说明 2"], toolCalls: 1, trail: [] },
+					{ index: 2, label: "gpt-5.6-luna", status: "failed", summary: "未通过", details: ["[高] 发现 3", "问题: 说明 3"], toolCalls: 1, trail: [] },
 				],
 			}),
 		);
@@ -544,11 +546,11 @@ describe("review activity layout", () => {
 		const lines = component?.render(64) ?? [];
 		expect(lines.length).toBeLessThanOrEqual(Math.floor(15 * 0.7));
 		const output = lines.join("\n");
-		expect(output).toContain("gpt-4.1 · [高] 发现 1");
+		expect(output).toContain("gpt-5.6-sol · [高] 发现 1");
 		expect(output).toContain("问题: 说明 1");
-		expect(output).toContain("gpt-4.1-nano · [高] 发现 2");
+		expect(output).toContain("gpt-5.6-terra · [高] 发现 2");
 		expect(output).toContain("问题: 说明 2");
-		expect(output).toContain("gpt-4.1-mini · [高] 发现 3");
+		expect(output).toContain("gpt-5.6-luna · [高] 发现 3");
 		expect(output).toContain("问题: 说明 3");
 		component?.dispose();
 	});
@@ -568,9 +570,9 @@ describe("review activity layout", () => {
 				advisorRunning: false,
 				language: "zh",
 				reviewers: [
-					{ index: 0, label: "gpt-4.1", status: "running", action: "读 state.ts", toolCalls: 1, trail: [] },
-					{ index: 1, label: "gpt-4.1-nano", status: "running", action: "跑测试", toolCalls: 1, trail: [] },
-					{ index: 2, label: "gpt-4.1-mini", status: "passed", action: "通过", details: ["验证通过"], toolCalls: 1, trail: [] },
+					{ index: 0, label: "gpt-5.6-sol", status: "running", action: "读 state.ts", toolCalls: 1, trail: [] },
+					{ index: 1, label: "gpt-5.6-terra", status: "running", action: "跑测试", toolCalls: 1, trail: [] },
+					{ index: 2, label: "gpt-5.6-luna", status: "passed", action: "通过", details: ["验证通过"], toolCalls: 1, trail: [] },
 					{ index: 3, label: "claude-3-7-sonnet", status: "running", action: "读 index.ts", toolCalls: 1, trail: [] },
 					{ index: 4, label: "gemini-2.5-pro", status: "passed", action: "通过", details: ["核验通过"], toolCalls: 1, trail: [] },
 				],
@@ -584,7 +586,9 @@ describe("review activity layout", () => {
 		// 8 * 0.7 = 5 行
 		expect(lines.length).toBeLessThanOrEqual(Math.floor(8 * 0.7));
 		const output = lines.join("\n");
-		expect(output).toContain("gpt-4.1");
+		expect(output).toContain("sol");
+		expect(output).toContain("terra");
+		expect(output).toContain("luna");
 		expect(output).toContain("c37");
 		expect(output).toContain("g25");
 		component?.dispose();

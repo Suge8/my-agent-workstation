@@ -58,7 +58,10 @@ export interface MasterConfig {
 }
 
 export const DEFAULT_MASTER_MODELS: MasterModel[] = [
-	{ model: "openai/gpt-4.1", thinking: "medium", use: "通用实现与调试" },
+	{ model: "openai-codex/gpt-5.6-sol", thinking: "medium", use: "调研与实现/调试，调研完就在原 Worker 会话继续实现" },
+	{ model: "openai-codex/gpt-5.6-luna", thinking: "medium", use: "大规模并行快任务：整库扫冗余、批量审查、跨语言迁移，成批开多个" },
+	{ model: "anthropic/claude-fable-5", thinking: "medium", use: "架构" },
+	{ model: "kimi-coding/k3-256k", thinking: "medium", use: "设计师" },
 ];
 
 export const FEATURES = [
@@ -257,9 +260,11 @@ const REVIEW_KEYS = new Set([
 	"language",
 ]);
 const DEFAULT_TOOLS = ["read", "grep", "find", "ls", "bash"];
-const DEFAULT_ADVISOR: ReviewModel = { model: "openai/gpt-4.1", thinking: "high" };
+const DEFAULT_ADVISOR: ReviewModel = { model: "kimi-coding/k3-256k", thinking: "max" };
 const DEFAULT_REVIEWERS: ReviewModel[] = [
-	{ model: "openai/gpt-4.1", thinking: "high" },
+	{ model: "anthropic/claude-opus-5", thinking: "high" },
+	{ model: "anthropic/claude-sonnet-5", thinking: "high" },
+	{ model: "anthropic/claude-fable-5", thinking: "high" },
 ];
 const THINKING_LEVELS = new Set<ThinkingLevelValue>([
 	"off",

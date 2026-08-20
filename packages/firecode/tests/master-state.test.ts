@@ -24,15 +24,15 @@ test("master 节未知字段、模型重复与缺失 model 都报配置问题", 
 		{
 			typo: true,
 			models: [
-				{ model: "openai-codex/gpt-4.1", extra: 1 },
+				{ model: "openai-codex/gpt-5.6-sol", extra: 1 },
 				{ thinking: "nope" },
-				{ model: "openai-codex/gpt-4.1" },
+				{ model: "openai-codex/gpt-5.6-sol" },
 			],
 		},
 		problems,
 	);
 	expect(parsed.models[0]).toEqual({
-		model: "openai-codex/gpt-4.1",
+		model: "openai-codex/gpt-5.6-sol",
 		thinking: "medium",
 		use: "通用",
 	});
@@ -64,7 +64,7 @@ test("紧凑行提取：标题+正文首句预览，无标记行退化纯标题"
 
 const dormant = {
 	name: "worker-1",
-	model: "openai-codex/gpt-4.1",
+	model: "openai-codex/gpt-5.6-sol",
 	thinking: "medium" as const,
 	status: "dormant" as const,
 	sessionPath: "/tmp/worker.jsonl",

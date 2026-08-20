@@ -26,7 +26,7 @@ function worker(status: WorkerRef["status"] = "working"): WorkerRef {
 		paneId: "w1:p2",
 		tabId: "w1:t2",
 		sessionPath: "/tmp/worker.jsonl",
-		model: "openai-codex/gpt-4.1",
+		model: "openai-codex/gpt-5.6-sol",
 		thinking: "medium",
 		status,
 	};
@@ -124,7 +124,7 @@ test("start can resume a Dormant Worker with its exact Pi session", async () => 
 		type: "UPSERT_WORKER",
 		worker: {
 			name: "worker-1",
-			model: "openai-codex/gpt-4.1",
+			model: "openai-codex/gpt-5.6-sol",
 			thinking: "high",
 			status: "dormant",
 			sessionPath: "/tmp/worker.jsonl",

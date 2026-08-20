@@ -27,7 +27,7 @@
   },
   "master": {
     "models": [
-      { "model": "openai/gpt-4.1", "thinking": "medium", "use": "通用实现与调试" }
+      { "model": "openai-codex/gpt-5.6-sol", "thinking": "medium", "use": "通用实现与调试" }
     ]
   },
   "presets": {

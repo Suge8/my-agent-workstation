@@ -1,6 +1,6 @@
 ---
 name: ui-picks
-description: 个人 UI 库选型表：需要动效组件、图标动效、canvas 特效、AI 聊天界面、字体搭配等能力时查表选库，按指定方式安装最新版本；用户说"选型库 / 我的库 / 用什么库"时也使用。
+description: 个人 UI 库选型表：需要动效组件、图标动效、canvas 特效、AI 聊天界面、界面音效、字体搭配等能力时查表选库，按指定方式安装最新版本；用户说"选型库 / 我的库 / 用什么库"时也使用。
 ---
 
 # UI Picks
@@ -67,6 +67,12 @@ description: 个人 UI 库选型表：需要动效组件、图标动效、canvas
 - 线程、流式输出、Markdown、工具调用 UI 等 ChatGPT 级交互；站点 [assistant-ui.com](https://www.assistant-ui.com)，文档读 <https://www.assistant-ui.com/llms.txt>。
 - 安装：已有项目 `npx assistant-ui@latest init`，新项目 `npx assistant-ui@latest create`；或直接装 `@assistant-ui/react` + 对应 runtime 包（如 `@assistant-ui/react-ai-sdk`）。
 - 属于产品 UI：样式与密度对齐项目设计系统，不套库默认主题了事。
+
+### UI SFX — 语义化界面音效（Web Audio / 跨端音频文件）
+
+- 78 个语义 cue（success、drop、processing、level-up 等）× 12 套音色人格，按交互语义调用、换 pack 不改交互代码；站点 [uisfx.com](https://uisfx.com)，机读读 <https://uisfx.com/docs/agent-guide.md>（另有可直接复制的接线提示词 `/agent-prompt.txt`）。
+- 安装 `npm i uisfx`：`createUISFX({ pack, preferences: {} })` + 首次可信交互里 `await ui.unlock()`（绕开自动播放限制），运行时 12KB 零依赖、本地合成不拉音频；React Native / 原生 / 引擎侧改用包内 `uisfx/sounds/{pack}/{cue}.mp3|ogg` 与 `uisfx/manifest`。代码 MIT、音频 CC0。
+- 红线：音效只强化已有的可见反馈，成功/警告/错误必须各自有视觉区分；提供持久静音开关（`setEnabled`），loop cue 随可见状态结束即 `stop()`，密集界面里 hover 音保持安静或关闭。
 
 ### 字体来源 — Fontshare（拉丁）+ 中文免费梯队（CJK）
 

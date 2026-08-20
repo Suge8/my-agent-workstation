@@ -86,7 +86,7 @@ test("toggles priority atomically in the extension config", () => {
 test("toggles only the openai section of a firecode config", () => {
 	const configPath = createConfig({
 		keys: { rename: "ctrl+r" },
-		presets: { sol: { model: "gpt-4.1" } },
+		presets: { sol: { model: "gpt-5.6-sol" } },
 		openai: {
 			nativeCompaction: false,
 			providers: { "openai-codex": { textVerbosity: "low", priority: true } },
@@ -97,7 +97,7 @@ test("toggles only the openai section of a firecode config", () => {
 	expect(disabled.enabled).toBe(false);
 	expect(JSON.parse(readFileSync(configPath, "utf8"))).toEqual({
 		keys: { rename: "ctrl+r" },
-		presets: { sol: { model: "gpt-4.1" } },
+		presets: { sol: { model: "gpt-5.6-sol" } },
 		openai: {
 			nativeCompaction: false,
 			providers: { "openai-codex": { textVerbosity: "low" } },

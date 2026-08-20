@@ -61,11 +61,11 @@ describe("result card payload", () => {
 			kind: "advisor",
 			// 真实输出契约：粗体段标题连写不空行；排版必须补空行，Markdown 才不会把三段折成一块。
 			advisor: { verdict: "continue", advice: "**核实结论**：发现属实\n**根因判断**：竞态\n**下一步方向**：补锁" },
-			advisorModel: "openai/gpt-4.1",
+			advisorModel: "kimi-coding/k3-256k",
 		}, "zh");
 		expect(advice.details).toMatchObject({ title: "顾问指引 · 继续修复", icon: "🧭", tone: "neutral" });
 		expect(advice.details.lines).toEqual([
-			"**模型 · gpt-4.1**",
+			"**模型 · k3-256k**",
 			"",
 			"**核实结论**：发现属实",
 			"",

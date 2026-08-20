@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const EXCLUDED = new Set([
-	".DS_Store", ".git", "search-skills", "archive", "archives", "eval", "evals", "cache", "vendor", "node_modules", "__pycache__",
+	".DS_Store", ".claude", ".git", "search-skills", "archive", "archives", "eval", "evals", "cache", "vendor", "node_modules", "__pycache__",
 ]);
 const PRIVATE = [/\/Users\/[^/\s]+(?:\/|$)/, /\/home\/[^/\s]+(?:\/|$)/, /~\/(?:\.agents|content-create)(?:\/|$)/];
 
@@ -30,7 +30,8 @@ function sanitize(buffer) {
 		.replaceAll("~/content-create", "<VIDEO_PROJECT>")
 		.replaceAll(/https:\/\/[A-Za-z0-9]+-dsn\.algolia\.net/g, "https://<ALGOLIA_APP_ID>-dsn.algolia.net")
 		.replaceAll(/x-algolia-api-key=[^&\s"'`]+/g, "x-algolia-api-key=<ALGOLIA_API_KEY>")
-		.replaceAll(/x-algolia-application-id=[^&\s"'`]+/g, "x-algolia-application-id=<ALGOLIA_APP_ID>"));
+		.replaceAll(/x-algolia-application-id=[^&\s"'`]+/g, "x-algolia-application-id=<ALGOLIA_APP_ID>")
+		.replaceAll(/sk-[A-Za-z0-9-]{8,}/g, "fixture-key"));
 }
 
 async function copyTree(source, target, exclude = () => false) {
@@ -109,8 +110,12 @@ export async function syncSources({ root = REPO, firecode, skills, system, check
 	for (const source of [firecode, skills, system]) if (!await exists(source)) throw new Error(`维护源不存在：${source}`);
 
 	const publicConfig = join(root, "packages", "firecode", "config.jsonc");
+	const portableLoader = join(root, "packages", "firecode", "tests", "loader.ts");
+	const searchSkill = join(root, "packages", "skills", "search", "search");
 	const setupSkill = join(root, "packages", "skills", "operations", "workstation-setup");
-	for (const overlay of [publicConfig, setupSkill]) if (!await exists(overlay)) throw new Error(`发行覆盖层不存在：${overlay}`);
+	for (const overlay of [publicConfig, portableLoader, searchSkill, setupSkill]) {
+		if (!await exists(overlay)) throw new Error(`发行覆盖层不存在：${overlay}`);
+	}
 
 	const stage = join(root, `.sync-sources.${process.pid}`);
 	await rm(stage, { recursive: true, force: true });
@@ -118,7 +123,11 @@ export async function syncSources({ root = REPO, firecode, skills, system, check
 		const next = join(stage, "next");
 		await copyTree(firecode, join(next, "firecode"), (name) => name === "config.jsonc");
 		await copyFile(publicConfig, join(next, "firecode", "config.jsonc"));
+		await mkdir(join(next, "firecode", "tests"), { recursive: true });
+		await copyFile(portableLoader, join(next, "firecode", "tests", "loader.ts"));
 		await copyTree(skills, join(next, "skills"));
+		await rm(join(next, "skills", "search", "search"), { recursive: true, force: true });
+		await copyTree(searchSkill, join(next, "skills", "search", "search"));
 		await rm(join(next, "skills", "operations", "workstation-setup"), { recursive: true, force: true });
 		await copyTree(setupSkill, join(next, "skills", "operations", "workstation-setup"));
 		await copyTree(system, join(next, "SYSTEM.md"));
