@@ -37,6 +37,15 @@ function withoutModelFields(section, fields) {
   return result;
 }
 
+function isDistributionPreset(name, preset) {
+  return name === "default"
+    && preset.provider === "openai"
+    && preset.model === "gpt-4.1"
+    && preset.thinkingLevel === "medium"
+    && preset.key === "alt+1"
+    && Object.keys(preset).length === 4;
+}
+
 export function renderModelProfile({
   profile,
   authenticatedProviders,
@@ -107,10 +116,9 @@ export function renderModelProfile({
   const currentPresets = object(currentFirecode.presets ?? {}, "FireCode presets");
   const managedPresets = new Set(Object.keys(profile.presets));
   const customPresets = {};
-  if (features.presets !== false) {
-    for (const [name, preset] of Object.entries(currentPresets)) {
-      if (!managedPresets.has(name)) customPresets[name] = object(preset, `FireCode preset ${name}`);
-    }
+  for (const [name, value] of Object.entries(currentPresets)) {
+    const preset = object(value, `FireCode preset ${name}`);
+    if (!managedPresets.has(name) && !isDistributionPreset(name, preset)) customPresets[name] = preset;
   }
   const presets = {};
   if (!disabled.has("presets")) {
