@@ -1,0 +1,12 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+*.log
+coverage/
+dist/
+node_modules/
+__pycache__/
+*.py[cod]
+.scratch/
+scratch/

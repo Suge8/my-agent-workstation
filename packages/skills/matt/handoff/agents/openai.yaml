@@ -1,0 +1,5 @@
+interface:
+  display_name: "交接"
+  short_description: "将对话压缩成交接文档"
+policy:
+  allow_implicit_invocation: false

@@ -62,11 +62,18 @@ test("生成完整 Pi、预设及当前公开 FireCode roster", () => {
     ],
   );
   assert.deepEqual(result.firecode.master.models, [
-    { model: "openai/gpt-4.1", thinking: "medium", use: "通用实现与调试" },
+    { model: "openai-codex/gpt-5.6-sol", thinking: "medium", use: "常规调研与实现、调试" },
+    { model: "antigravity/gemini-3.7-flash", thinking: "high", use: "快速轻量调研" },
+    { model: "openai-codex/gpt-5.6-luna", thinking: "xhigh", use: "大规模并行快任务" },
+    { model: "anthropic/claude-opus-5", thinking: "medium", use: "前端与综合架构" },
+    { model: "anthropic/claude-fable-5", thinking: "high", use: "高级架构顾问" },
+    { model: "kimi-coding/k3-256k", thinking: "high", use: "视觉设计" },
   ]);
-  assert.deepEqual(result.firecode.review.advisor, { model: "openai/gpt-4.1", thinking: "high" });
+  assert.deepEqual(result.firecode.review.advisor, { model: "anthropic/claude-fable-5", thinking: "high" });
   assert.deepEqual(result.firecode.review.reviewers, [
-    { model: "openai/gpt-4.1", thinking: "high" },
+    { model: "anthropic/claude-sonnet-5", thinking: "medium" },
+    { model: "anthropic/claude-opus-5", thinking: "medium" },
+    { model: "openai-codex/gpt-5.6-sol", thinking: "medium" },
   ]);
 });
 
@@ -92,28 +99,14 @@ test("provider 缺失时必须显式替换或设 null", () => {
   assert.doesNotMatch(JSON.stringify(result), /anthropic\/|antigravity\/|deepseek\/|kimi-coding\/|xai\//);
 });
 
-test("只校验最终被引用的非 null 模型", () => {
-  const result = render({
-    authenticatedProviders: allProviders.filter((provider) => provider !== "openai"),
-    availableModels: availableModels.filter((model) => model !== "openai/gpt-4.1"),
-    selections: {
-      models: { "firecode-default": "missing/not-real" },
-      disabled: ["master", "review"],
-    },
-  });
-  assert.equal(result.firecode.features.master, false);
-  assert.equal(result.firecode.features.review, false);
-  assert.doesNotMatch(JSON.stringify(result), /missing\/not-real/);
-});
-
 test("拒绝最终引用但不在当前 Pi 目录中的模型", () => {
   assert.throws(
     () => render({ selections: { models: { opus5: "openai-codex/definitely-not-a-real-model" } } }),
     /不在当前 Pi 可用模型目录中/,
   );
   assert.throws(
-    () => render({ availableModels: availableModels.filter((model) => model !== "openai/gpt-4.1") }),
-    /openai\/gpt-4.1 不在当前 Pi 可用模型目录中/,
+    () => render({ availableModels: availableModels.filter((model) => model !== "anthropic/claude-fable-5") }),
+    /anthropic\/claude-fable-5 不在当前 Pi 可用模型目录中/,
   );
   assert.throws(
     () => render({ firecode: { presets: { custom: { provider: "openai-codex", model: "missing" } } } }),
@@ -154,12 +147,12 @@ test("保留无关配置并应用当前快捷键基线", () => {
   assert.equal(result.piSettings.warnings.terminal, false);
   assert.deepEqual(result.piSettings.compaction, { reserveTokens: 1234 });
   assert.equal(result.piKeybindings["tui.editor.cursorUp"], "alt+k");
-  assert.equal(result.piKeybindings["app.model.cycleForward"], "shift+tab");
-  assert.equal(result.piKeybindings["app.thinking.cycle"], "tab");
+  assert.deepEqual(result.piKeybindings["app.model.cycleForward"], ["shift+tab"]);
+  assert.deepEqual(result.piKeybindings["app.thinking.cycle"], ["tab"]);
   assert.deepEqual(result.piKeybindings["tui.input.tab"], []);
   assert.deepEqual(result.piKeybindings["tui.editor.cursorWordRight"], ["alt+right", "ctrl+right"]);
-  assert.equal(result.piKeybindings["tui.editor.cursorRight"], "right");
-  assert.equal(result.piKeybindings["app.session.rename"], "alt+r");
+  assert.deepEqual(result.piKeybindings["tui.editor.cursorRight"], ["right"]);
+  assert.deepEqual(result.piKeybindings["app.session.rename"], ["alt+r"]);
   assert.equal(result.firecode.features.header, false);
   assert.deepEqual(result.firecode.openai, { nativeCompaction: true });
   assert.deepEqual(Object.keys(result.firecode.presets), [

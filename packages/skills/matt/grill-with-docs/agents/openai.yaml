@@ -1,0 +1,5 @@
+interface:
+  display_name: "带文档的深度追问"
+  short_description: "追问设计并编写其文档"
+policy:
+  allow_implicit_invocation: false

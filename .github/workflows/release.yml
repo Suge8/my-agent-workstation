@@ -1,0 +1,26 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: brew install shellcheck
+      - run: bun run check:shell
+      - run: bun run test
+      - run: npm ci --prefix packages/better-computer-use --ignore-scripts
+      - run: npm run test:bcu
+      - run: |
+          version=$(node -p "require('./package.json').version")
+          test "$GITHUB_REF_NAME" = "v$version"
+      - run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -15,8 +15,7 @@
     "ds-pro": { "provider": "deepseek", "model": "deepseek-v4-pro" },
     "k3": { "provider": "kimi-coding", "model": "k3" },
     "k3-256": { "provider": "kimi-coding", "model": "k3-256k" },
-    "gemini": { "provider": "antigravity", "model": "gemini-3.7-flash" },
-    "firecode-default": { "provider": "openai", "model": "gpt-4.1" }
+    "gemini": { "provider": "antigravity", "model": "gemini-3.7-flash" }
   },
   "default": "sol",
   "cycle": [
@@ -46,21 +45,28 @@
     "xai": { "model": "xai", "thinkingLevel": "high", "key": "alt+7" }
   },
   "master": [
-    { "model": "firecode-default", "thinking": "medium", "use": "通用实现与调试" }
+    { "model": "sol", "thinking": "medium", "use": "常规调研与实现、调试" },
+    { "model": "gemini", "thinking": "high", "use": "快速轻量调研" },
+    { "model": "luna", "thinking": "xhigh", "use": "大规模并行快任务" },
+    { "model": "opus5", "thinking": "medium", "use": "前端与综合架构" },
+    { "model": "fable", "thinking": "high", "use": "高级架构顾问" },
+    { "model": "k3-256", "thinking": "high", "use": "视觉设计" }
   ],
   "review": {
-    "advisor": { "model": "firecode-default", "thinking": "high" },
+    "advisor": { "model": "fable", "thinking": "high" },
     "reviewers": [
-      { "model": "firecode-default", "thinking": "high" }
+      { "model": "sonnet", "thinking": "medium" },
+      { "model": "opus5", "thinking": "medium" },
+      { "model": "sol", "thinking": "medium" }
     ]
   },
   "keybindings": {
-    "app.model.cycleForward": "shift+tab",
-    "app.thinking.cycle": "tab",
+    "app.model.cycleForward": ["shift+tab"],
+    "app.thinking.cycle": ["tab"],
     "tui.input.tab": [],
     "tui.editor.cursorWordRight": ["alt+right", "ctrl+right"],
-    "tui.editor.cursorRight": "right",
-    "app.session.rename": "alt+r"
+    "tui.editor.cursorRight": ["right"],
+    "app.session.rename": ["alt+r"]
   },
   "firecodeKeys": {
     "rename": "ctrl+r",

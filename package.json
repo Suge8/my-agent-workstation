@@ -1,0 +1,15 @@
+{
+  "name": "my-agent-workstation",
+  "version": "0.1.0",
+  "private": true,
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["packages/firecode/index.ts"],
+    "skills": ["packages/skills"]
+  },
+  "scripts": {
+    "test": "bun test tests packages/firecode/tests",
+    "test:bcu": "npm --prefix packages/better-computer-use test",
+    "check:shell": "bash -n setup lib/workstation.sh && shellcheck setup lib/workstation.sh"
+  }
+}

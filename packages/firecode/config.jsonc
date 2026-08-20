@@ -1,0 +1,87 @@
+{
+	// 安装器会按用户认证生成模型配置；发行副本先关闭会发起模型调用的能力。
+	"features": {
+		"header": true,
+		"statusbar": true,
+		"tools": true,
+		"presets": false,
+		"rename": true,
+		"stats": true,
+		"claudeSub": false,
+		"openaiNative": false,
+		"workingFlame": true,
+		"bark": false,
+		"review": false,
+		"master": false
+	},
+
+	// 快捷键，启动时绑定，改完需重启 pi。
+	"keys": {
+		"rename": "ctrl+r", // 改当前会话名（/resume 列表里另有 keybindings.json 的 alt+r）
+		"cyclePreset": "ctrl+shift+u", // 在下面 presets 之间轮切
+		"fast": "ctrl+f" // 开关当前供应商的加速档（见下方 priority 说明）
+	},
+
+	// OpenAI 系请求层微调。
+	// nativeCompaction：上下文快满时让 OpenAI 官方接口自己压缩历史，代替 pi 本地压缩。
+	// textVerbosity：回答啰嗦程度（low 少废话），仅 OpenAI 支持。
+	// priority：加速档，加钱换更快出字——OpenAI 官方称最高约 2.5× 速、按加价计费；
+	// xAI 官方称 2× 价、提速幅度没公布。ctrl+f 只切当前供应商这一项；没列在 providers 里的供应商无加速档。
+	"openai": {
+		"nativeCompaction": true,
+		"providers": {
+			"openai-codex": { "textVerbosity": "low", "priority": true },
+			"xai": { "priority": true }
+		}
+	},
+
+	// /fire-master 派 Worker 时的选型表，会注入给 Master 看。use 写清楚适用场景，Master 照着挑。
+	// 发行包只提供中性示例；用户应按已认证的供应商生成或替换模型档案。
+	// 某个模型没额度了就改这里（重启生效），或直接口头告诉 Master 换表里另一个（不用改配置）。
+	// 新建子代理必须显式选表内模型与 thinking 档：省略会被工具拒绝，不会静默沿用你当前会话的（贵）模型和档位；
+	// 下面的 thinking 是给 Master 的基准建议，想用表外模型先在这里加一行。
+	// 省略整节用内置默认（内容同下）。
+	"master": {
+		"models": [
+			{
+				"model": "openai/gpt-4.1",
+				"thinking": "medium",
+				"use": "通用实现与调试"
+			}
+		]
+	},
+
+	// 预设：一键切换模型、思考等级、工具集与附加指令。发行包仅放一个中性示例。
+	// 预设定义见 firecode/config.jsonc 的 presets 节。
+	// 字段都可选：provider / model / thinkingLevel / tools / instructions / key；没写 key 只能 /preset。
+	// thinkingLevel = 思考深度，档越高越慎重也越慢越贵：off minimal low medium high xhigh max
+	"presets": {
+		"default": {
+			"provider": "openai",
+			"model": "gpt-4.1",
+			"thinkingLevel": "medium",
+			"key": "alt+1"
+		}
+	},
+
+	// /fire-review 对抗性审查：几个审查模型并行挑毛病，全部说过才算过；发行包只提供中性示例。
+	// reviewers 可按需扩充为多个已认证模型。没过就自动修、修完再审，循环到过或到轮数上限停下交还用户。
+	// advisor：顾问模型——连续 advisorAfterFailures 轮没过时出面裁决：继续修/收窄范围/叫停。
+	// reviewers：审查者，每个是独立 pi 子进程；首轮全量审，之后只盯没收拾干净的问题。
+	// maxRounds：轮数硬上限。timeoutMinutes：单个审查者/顾问超时分钟数。
+	// tools：审查者可用工具，只读不改文件；留 bash 是为了跑测试取证。
+	// background.command：启动审查子进程用的命令。language：审查报告语言 zh/en。
+	// 字段都可省略；拼错字段名会直接报配置错误而不是静默忽略。
+	"review": {
+		"advisor": { "model": "openai/gpt-4.1", "thinking": "high" },
+		"reviewers": [
+			{ "model": "openai/gpt-4.1", "thinking": "high" }
+		],
+		"maxRounds": 5,
+		"advisorAfterFailures": 2,
+		"timeoutMinutes": 20,
+		"tools": ["read", "grep", "find", "ls", "bash"],
+		"background": { "command": "pi" },
+		"language": "zh"
+	}
+}

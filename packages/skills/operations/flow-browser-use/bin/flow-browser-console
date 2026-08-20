@@ -1,0 +1,73 @@
+#!/usr/bin/env node
+// CloakBrowser 的反检测补丁抑制 Runtime.consoleAPICalled / exceptionThrown，
+// agent-browser 的 `console` / `errors` 命令在专属实例上永远为空。
+// legacy Console domain 未被抑制：Console.enable 会立即重放该 tab 缓存的
+// 全部历史消息（实测 CloakBrowser 145 成立），本脚本直接走这条通道。
+// 局限：未捕获异常不经 Console domain，捕获不到。
+//
+// Usage: flow-browser-console [url-substring] [--wait <sec>]
+//   url-substring  匹配 tab 的 url/title；缺省取第一个非内部页
+//   --wait <sec>   enable 后的收集窗口，默认 2（历史重放 + 窗口内实时消息）
+// Env:   FLOW_BROWSER_PORT (default 9333)
+
+const PORT = process.env.FLOW_BROWSER_PORT || '9333';
+
+function parseArgs(argv) {
+  let match = null;
+  let wait = 2;
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--wait') wait = parseFloat(argv[++i]) || 2;
+    else match = argv[i];
+  }
+  return { match, wait };
+}
+
+function pickTab(tabs, match) {
+  const pages = tabs.filter((t) => t.type === 'page');
+  if (match) {
+    const lower = match.toLowerCase();
+    return pages.find(
+      (t) => t.url.toLowerCase().includes(lower) || (t.title || '').toLowerCase().includes(lower),
+    );
+  }
+  return pages.find((t) => /^(https?|file):/.test(t.url));
+}
+
+function formatMessage(m) {
+  const loc = m.url ? `  (${m.url}${m.line ? ':' + m.line : ''})` : '';
+  return `[${m.level}] ${m.text}${loc}`;
+}
+
+async function main() {
+  const { match, wait } = parseArgs(process.argv.slice(2));
+  const res = await fetch(`http://127.0.0.1:${PORT}/json/list`).catch(() => null);
+  if (!res) {
+    console.error(`CDP not reachable on ${PORT} — run flow-browser-start first`);
+    process.exit(1);
+  }
+  const tabs = await res.json();
+  const tab = pickTab(tabs, match);
+  if (!tab) {
+    console.error(match ? `no tab matching "${match}". Tabs:` : 'no page tabs. Tabs:');
+    for (const t of tabs.filter((t) => t.type === 'page')) console.error(`  ${t.url}`);
+    process.exit(1);
+  }
+  console.error(`tab: ${tab.url}`);
+
+  const ws = new WebSocket(tab.webSocketDebuggerUrl);
+  ws.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.method === 'Console.messageAdded') console.log(formatMessage(msg.params.message));
+  };
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ id: 1, method: 'Console.enable' }));
+    setTimeout(() => ws.close(), wait * 1000);
+  };
+  ws.onclose = () => process.exit(0);
+  ws.onerror = () => {
+    console.error('websocket error');
+    process.exit(1);
+  };
+}
+
+main();

@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "credential_schema": "credentials.schema.json",
+  "auth_policy": { "existing_valid_auth": "skip" },
+  "providers": [
+    {
+      "id": "brave",
+      "purpose": "精确网页搜索、时效信息与官方链接",
+      "optional": true,
+      "auth": { "kind": "restricted-secret", "runtime_name": "BRAVE_SEARCH_API_KEY" }
+    },
+    {
+      "id": "exa",
+      "purpose": "语义搜索、代码与相似实现检索",
+      "optional": true,
+      "auth": { "kind": "restricted-secret", "runtime_name": "EXA_API_KEY" }
+    },
+    {
+      "id": "context7",
+      "purpose": "当前版本的官方库文档",
+      "optional": true,
+      "auth": { "kind": "provider-oauth", "command": "ctx7", "login_action": "login" }
+    },
+    {
+      "id": "bark",
+      "purpose": "任务完成后的可选设备通知",
+      "optional": true,
+      "auth": { "kind": "restricted-secret" },
+      "missing_auth": "disabled"
+    }
+  ],
+  "secret_policy": {
+    "input_echo": false,
+    "file_mode": "0600",
+    "forbidden_destinations": ["shell-config", "repository", "logs", "backups", "state"]
+  }
+}

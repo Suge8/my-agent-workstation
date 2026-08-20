@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "components": [
+    {
+      "id": "ghostty",
+      "optional": true,
+      "install": { "kind": "homebrew-cask", "name": "ghostty" },
+      "assets": [
+        {
+          "source": "ghostty.conf",
+          "target": "xdg:ghostty/workstation.conf",
+          "ownership": "managed-fragment",
+          "integration": "include-from-user-config"
+        }
+      ]
+    },
+    {
+      "id": "starship",
+      "optional": true,
+      "install": { "kind": "homebrew-formula", "name": "starship" },
+      "assets": [
+        { "source": "starship.toml", "target": "xdg:starship.toml", "ownership": "managed-file" }
+      ],
+      "shell_init": "eval \"$(starship init zsh)\""
+    },
+    {
+      "id": "fastfetch",
+      "optional": true,
+      "install": { "kind": "homebrew-formula", "name": "fastfetch" },
+      "assets": [
+        { "source": "fastfetch/config.jsonc", "target": "xdg:fastfetch/config.jsonc", "ownership": "managed-file" },
+        { "source": "fastfetch/logo.txt", "target": "xdg:fastfetch/logo.txt", "ownership": "managed-file" }
+      ],
+      "render": { "@FASTFETCH_LOGO_PATH@": "xdg:absolute:fastfetch/logo.txt" },
+      "shaders": false
+    },
+    {
+      "id": "zsh-autosuggestions",
+      "optional": true,
+      "install": { "kind": "homebrew-formula", "name": "zsh-autosuggestions" }
+    },
+    {
+      "id": "zsh-syntax-highlighting",
+      "optional": true,
+      "install": { "kind": "homebrew-formula", "name": "zsh-syntax-highlighting" }
+    },
+    {
+      "id": "zsh-assist",
+      "optional": true,
+      "requires": ["zsh-autosuggestions", "zsh-syntax-highlighting"],
+      "assets": [
+        {
+          "source": "zsh-plugins.zsh",
+          "target": "xdg:my-agent-workstation/zsh-assist.zsh",
+          "ownership": "managed-file"
+        }
+      ],
+      "render": { "@HOMEBREW_PREFIX@": "homebrew:prefix" },
+      "integration": { "kind": "source-once-from-zshrc", "position": "last" }
+    },
+    {
+      "id": "maple-mono-nf",
+      "optional": true,
+      "install": { "kind": "homebrew-cask", "name": "font-maple-mono-nf" }
+    }
+  ]
+}

@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Flow Browser profile sync.
+# Seeds (or refreshes) the dedicated CloakBrowser profile with login state
+# from the user's everyday Helium profile:
+#   - Cookies: consistent online snapshot via SQLite backup API (the user's
+#     Helium can keep running), then transcrypted from Helium's Keychain key
+#     to CloakBrowser's (Chromium Safe Storage) so they decrypt.
+#   - Preferences, Local Storage, Network state: copied.
+#   - Passwords (Login Data) and autofill (Web Data) are NOT synced: passwords
+#     are encrypted with Helium's key (per-entry transcryption not worth the
+#     risk); Web Data is held under an exclusive lock while Helium runs. Log
+#     in once with FLOW_BROWSER_HEADED=1 where a password is needed.
+#
+# Usage:
+#   flow-browser-sync-profile           # seed if empty, else refuse (avoid clobber)
+#   flow-browser-sync-profile --force   # delete existing dest and re-seed
+#
+# Requires the dedicated instance to be stopped (we rebuild its profile) and
+# CloakBrowser to have run at least once (its Keychain key must exist).
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SRC="${FLOW_BROWSER_SOURCE_PROFILE:-$HOME/Library/Application Support/net.imput.helium}"
+DST="${FLOW_BROWSER_PROFILE:-$HOME/.flow-browser/profile}"
+FORCE=0
+[ "${1:-}" = "--force" ] && FORCE=1
+
+log() { printf '%s\n' "$*" >&2; }
+fail() { log "Profile sync failed: $*"; exit 1; }
+
+command -v sqlite3 >/dev/null 2>&1 || fail "missing command: sqlite3"
+command -v node >/dev/null 2>&1 || fail "missing command: node"
+[ -d "$SRC/Default" ] || fail "source profile not found: $SRC"
+
+# Guard the destructive rm -rf below. A misconfigured FLOW_BROWSER_PROFILE must
+# never wipe anything outside the dedicated ~/.flow-browser base directory.
+BASE_ABS="$HOME/.flow-browser"
+# Canonicalize WITHOUT requiring the path to exist (resolves .. and symlinks of
+# existing parents). Reject any path that cannot be made canonical.
+canonicalize() {
+  local p="$1" parent leaf
+  [ -n "$p" ] || return 1
+  if [ -d "$p" ]; then ( cd "$p" 2>/dev/null && pwd -P ); return; fi
+  parent="$(dirname "$p")"; leaf="$(basename "$p")"
+  [ -d "$parent" ] || return 1
+  printf '%s/%s\n' "$(cd "$parent" && pwd -P)" "$leaf"
+}
+mkdir -p "$BASE_ABS"
+DST_ABS="$(canonicalize "$DST")" || fail "cannot resolve destination path: $DST"
+BASE_CANON="$(cd "$BASE_ABS" && pwd -P)"
+# Hard whitelist: DST must live strictly inside ~/.flow-browser/.
+case "$DST_ABS" in
+  "$BASE_CANON"/?*) : ;;
+  *) fail "destination must be inside $BASE_CANON/ (got: $DST_ABS); set FLOW_BROWSER_PROFILE accordingly" ;;
+esac
+
+# Only the dedicated instance must be stopped (we delete and rebuild its
+# profile). The user's everyday Helium may keep running: SQLite's backup API
+# takes a consistent snapshot even mid-write.
+if pgrep -f "user-data-dir=$DST_ABS" >/dev/null 2>&1; then
+  fail "dedicated instance is running; stop it first: flow-browser stop"
+fi
+
+if [ -d "$DST" ] && [ "$FORCE" != "1" ]; then
+  fail "destination exists: $DST (use --force to delete and re-seed)"
+fi
+
+log "Re-seeding dedicated profile"
+log "  from: $SRC"
+log "  to:   $DST"
+rm -rf "$DST"
+mkdir -p "$DST/Default"
+
+# Cookies: online consistent snapshot, then transcrypt to CloakBrowser's key.
+sqlite3 "$SRC/Default/Cookies" ".backup '$DST/Default/Cookies'" \
+  || fail "cookie snapshot failed (source locked beyond retry?)"
+log "  + Default/Cookies (online snapshot)"
+node "$DIR/transcrypt-cookies.js" "$DST/Default/Cookies" \
+  || fail "cookie transcryption failed"
+
+# Plain files/dirs. Local Storage is LevelDB: copying while Helium runs is
+# best-effort (Chromium rebuilds it if inconsistent; worst case a site loses
+# localStorage, cookies above are unaffected).
+( cd "$SRC/Default"
+  for item in "Preferences" "Local Storage" "Network"; do
+    [ -e "$item" ] && cp -Rp "$item" "$DST/Default/$item" 2>/dev/null && log "  + Default/$item"
+  done
+) || true
+# Never ship a second cookie DB under Network/ (ours lives at Default/Cookies).
+rm -f "$DST/Default/Network/Cookies" "$DST/Default/Network/Cookies-journal" 2>/dev/null || true
+
+# Strip singleton locks that would block the dedicated instance from launching.
+rm -f "$DST/Singleton"* "$DST/Default/Singleton"* "$DST/Default/lockfile" 2>/dev/null || true
+
+log "Done. Seed size: $(du -sh "$DST" 2>/dev/null | cut -f1)"
+log "Note: size grows after first run as the browser writes its own caches."

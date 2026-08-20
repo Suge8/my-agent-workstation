@@ -1,0 +1,2 @@
+{"type":"session","version":3,"id":"running-session"}
+{"type":"custom","customType":"firecode-review-checkpoint","data":{"version":5,"seq":1,"runId":"running-run","phase":"reviewing","round":1,"focus":"","history":[],"active":{"round":1,"reviewers":[{"index":0,"model":"p/m","thinking":"high","status":"running","result":null}],"settledCount":0},"pending":null,"repair":null,"summary":null,"consecutiveFailures":0,"startedAt":1,"roundStartedAt":1,"updatedAt":1}}

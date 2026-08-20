@@ -1,0 +1,5 @@
+interface:
+  display_name: "生成规格说明"
+  short_description: "将对话整理成规格说明"
+policy:
+  allow_implicit_invocation: false
