@@ -1,0 +1,30 @@
+{
+	// Copy to the Pi Agent directory at extensions/firecode/config.jsonc, then restart Pi.
+	// The template enables only local UI and session conveniences. Turn on provider,
+	// notification, review, and delegation features after configuring their requirements.
+	"features": {
+		"header": true,
+		"statusbar": true,
+		"tools": true,
+		"presets": true,
+		"rename": true,
+		"stats": true,
+		"claudeSub": false,
+		"openaiNative": false,
+		"workingFlame": true,
+		"bark": false,
+		"review": false,
+		"master": false
+	},
+	"keys": {
+		"rename": "ctrl+r",
+		"cyclePreset": "ctrl+shift+u",
+		"fast": "ctrl+f"
+	},
+	"presets": {
+		"deep": {
+			"thinkingLevel": "high",
+			"key": "alt+1"
+		}
+	}
+}

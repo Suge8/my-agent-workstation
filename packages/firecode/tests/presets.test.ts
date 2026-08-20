@@ -1,13 +1,13 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect, test } from "bun:test";
-import { parseJsonc } from "../config.ts";
+import { parseJsonc } from "../jsonc.ts";
 import { FIRECODE_DIR, cleanupFirecodeModules, loadFirecodeModule } from "./loader.ts";
 
 afterEach(cleanupFirecodeModules);
 
 test("binds exactly the shortcuts declared by preset key fields", async () => {
-	const { presets } = parseJsonc(readFileSync(join(FIRECODE_DIR, "config.jsonc"), "utf8")) as {
+	const { presets } = parseJsonc(readFileSync(join(FIRECODE_DIR, "config.example.jsonc"), "utf8")) as {
 		presets: Record<string, { key?: string }>;
 	};
 	const declared = Object.values(presets as Record<string, { key?: string }>)

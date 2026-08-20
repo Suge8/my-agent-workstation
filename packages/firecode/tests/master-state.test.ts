@@ -1,8 +1,8 @@
-import { expect, test } from "bun:test";
+import { afterAll, expect, test } from "bun:test";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_MASTER_MODELS, parseMasterConfig } from "../config.js";
+import type { MasterConfig, MasterModel } from "../config.js";
 import { masterEventDetails } from "../master/event-format.js";
 import {
 	MasterStore,
@@ -11,6 +11,14 @@ import {
 	reduceMaster,
 	restoreMasterState,
 } from "../master/state.js";
+import { cleanupFirecodeModules, loadFirecodeModule } from "./loader.ts";
+
+const configModule = await loadFirecodeModule("config.js") as {
+	DEFAULT_MASTER_MODELS: MasterModel[];
+	parseMasterConfig(raw: Record<string, unknown>, problems: string[]): MasterConfig;
+};
+const { DEFAULT_MASTER_MODELS, parseMasterConfig } = configModule;
+afterAll(cleanupFirecodeModules);
 
 test("master 节省略时用默认花名册，无配置问题", () => {
 	const problems: string[] = [];

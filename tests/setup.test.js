@@ -370,17 +370,31 @@ describe("setup public CLI", () => {
     expect(probe.stdout).toBe("durable\n");
   });
 
-  test("authenticated providers generate only available model configuration", () => {
+  test("authenticated providers generate the runtime FireCode configuration", () => {
     const f = fixture(ready({ "auth-openai-codex": "" }));
     const result = apply(f);
     expect(result.status).toBe(0, result.stderr);
-    const settingsPath = join(f.home, ".pi", "agent", "settings.json");
-    const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+    const agent = join(f.home, ".pi", "agent");
+    const settings = JSON.parse(readFileSync(join(agent, "settings.json"), "utf8"));
     expect(settings.enabledModels).toEqual(["openai-codex/gpt-5.6-sol"]);
-    const firecode = JSON.parse(readFileSync(join(f.managed, "pi-package", "firecode", "config.jsonc"), "utf8"));
+    const firecode = JSON.parse(readFileSync(join(agent, "extensions", "firecode", "config.jsonc"), "utf8"));
     expect(firecode.features.master).toBe(true);
     expect(firecode.features.review).toBe(false);
     expect(JSON.stringify(firecode)).not.toContain("anthropic/");
+    expect(existsSync(join(f.managed, "pi-package", "firecode", "config.jsonc"))).toBe(false);
+    expect(existsSync(join(f.managed, "pi-package", "firecode", "config.example.jsonc"))).toBe(true);
+  });
+
+  test("runtime FireCode configuration write failures fail apply", () => {
+    const f = fixture(ready({ "auth-openai-codex": "" }));
+    const agent = join(f.home, ".pi", "agent");
+    mkdirSync(agent, { recursive: true });
+    writeFileSync(join(agent, "extensions"), "blocks the runtime configuration directory\n");
+
+    const result = apply(f);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("ENOTDIR");
   });
 
   test("custom mode installs only the selected optional capability", () => {

@@ -18,13 +18,13 @@ function file(path: string, content: string) {
 test("maintainer sync refuses to overwrite a dirty distribution snapshot", async () => {
 	const root = mkdtempSync(join(tmpdir(), "myaw-sync-dirty-"));
 	roots.push(root);
-	file(join(root, "packages", "firecode", "config.jsonc"), "{}\n");
+	file(join(root, "packages", "firecode", "config.example.jsonc"), "{}\n");
 	file(join(root, "packages", "skills", "placeholder"), "clean\n");
 	file(join(root, "packages", "pi-config", "SYSTEM.md"), "clean\n");
 	expect(spawnSync("git", ["init", "-q"], { cwd: root }).status).toBe(0);
 	expect(spawnSync("git", ["add", "."], { cwd: root }).status).toBe(0);
 	expect(spawnSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "base"], { cwd: root }).status).toBe(0);
-	writeFileSync(join(root, "packages", "firecode", "config.jsonc"), '{"dirty":true}\n');
+	writeFileSync(join(root, "packages", "firecode", "config.example.jsonc"), '{"dirty":true}\n');
 	await expect(syncSources({ root, firecode: root, skills: root, system: join(root, "packages", "pi-config", "SYSTEM.md") }))
 		.rejects.toThrow("未提交修改");
 });
@@ -41,6 +41,7 @@ test("maintainer sync mirrors public assets, preserves overlays, and follows act
 
 	file(join(firecode, "index.ts"), 'export const path = "portable";\n');
 	file(join(firecode, "config.jsonc"), '{"private":true}\n');
+	file(join(firecode, "config.example.jsonc"), '{"features":{"review":false}}\n');
 	file(join(firecode, "AGENTS.md"), "source-only config guide\n");
 	file(join(skills, "creative", "video", "SKILL.md"), "Use the current project directory.\n");
 	file(join(skills, "creative", "video", "guide.md"), "Read https://remotion.dev/docs/.\n");
@@ -51,7 +52,7 @@ test("maintainer sync mirrors public assets, preserves overlays, and follows act
 	mkdirSync(join(skills, "development"), { recursive: true });
 	symlinkSync(linkedSkill, join(skills, "development", "architecture-wiki"));
 	file(system, "public system\n");
-	file(join(targetFirecode, "config.jsonc"), '{"features":{"review":false}}\n');
+	file(join(targetFirecode, "config.example.jsonc"), '{"old":true}\n');
 	file(join(targetFirecode, "AGENTS.md"), "public config guide\n");
 	file(join(targetFirecode, "tests", "loader.ts"), "portable loader\n");
 	file(join(targetFirecode, "orphan.ts"), "remove me\n");
@@ -62,7 +63,8 @@ test("maintainer sync mirrors public assets, preserves overlays, and follows act
 
 	await syncSources({ root, firecode, skills, system, checkClean: false });
 
-	expect(readFileSync(join(targetFirecode, "config.jsonc"), "utf8")).toBe('{"features":{"review":false}}\n');
+	expect(existsSync(join(targetFirecode, "config.jsonc"))).toBe(false);
+	expect(readFileSync(join(targetFirecode, "config.example.jsonc"), "utf8")).toBe('{"features":{"review":false}}\n');
 	expect(readFileSync(join(targetFirecode, "AGENTS.md"), "utf8")).toBe("public config guide\n");
 	expect(readFileSync(join(targetFirecode, "tests", "loader.ts"), "utf8")).toBe("portable loader\n");
 	expect(readFileSync(join(targetFirecode, "index.ts"), "utf8")).toBe('export const path = "portable";\n');
@@ -89,11 +91,12 @@ test("maintainer sync rejects plaintext credentials before replacing the snapsho
 	const targetSkills = join(root, "packages", "skills");
 	file(join(firecode, "index.ts"), "BRAVE_API_KEY=0123456789abcdef0123456789abcdef\n");
 	file(join(firecode, "config.jsonc"), "{}\n");
+	file(join(firecode, "config.example.jsonc"), "{}\n");
 	file(join(firecode, "AGENTS.md"), "source guide\n");
 	file(join(skills, "placeholder", "SKILL.md"), "public\n");
 	file(system, "public system\n");
 	file(join(targetFirecode, "index.ts"), "previous snapshot\n");
-	file(join(targetFirecode, "config.jsonc"), "{}\n");
+	file(join(targetFirecode, "config.example.jsonc"), "{}\n");
 	file(join(targetFirecode, "AGENTS.md"), "public guide\n");
 	file(join(targetFirecode, "tests", "loader.ts"), "portable loader\n");
 	file(join(targetSkills, "search", "search", "SKILL.md"), "keychain search\n");

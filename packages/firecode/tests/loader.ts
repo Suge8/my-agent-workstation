@@ -2,7 +2,7 @@
  * 在测试里加载 FireCode 模块：扩展运行时由 pi 注入 `@earendil-works/*`，
  * 测试环境没有这层注入，因此把整个插件目录复制到临时目录；有 PI_SOURCE 时改写到 pi 源码，否则改写到独立的最小运行时 shim 文件。
  */
-import { cp, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -122,11 +122,11 @@ if (SHIM_ROOT) {
 let importSequence = 0;
 const created: string[] = [];
 
-async function rewriteImports(directory: string): Promise<void> {
+async function rewriteImports(directory: string, agentDirectory: string): Promise<void> {
 	for (const entry of await readdir(directory, { withFileTypes: true })) {
 		const path = join(directory, entry.name);
 		if (entry.isDirectory()) {
-			await rewriteImports(path);
+			await rewriteImports(path, agentDirectory);
 			continue;
 		}
 		if (!entry.name.endsWith(".ts")) continue;
@@ -134,6 +134,7 @@ async function rewriteImports(directory: string): Promise<void> {
 			.replaceAll('"@earendil-works/pi-coding-agent"', JSON.stringify(PI_CODING_AGENT))
 			.replaceAll('"@earendil-works/pi-ai"', JSON.stringify(PI_AI))
 			.replaceAll('"@earendil-works/pi-tui"', JSON.stringify(PI_TUI))
+			.replaceAll("getAgentDir()", JSON.stringify(agentDirectory))
 			.replaceAll("os.homedir()", "(process.env.PI_TEST_HOME ?? os.homedir())")
 			.replace(/(?<!os\.)homedir\(\)/g, "(process.env.PI_TEST_HOME ?? homedir())");
 		await writeFile(path, source);
@@ -142,12 +143,12 @@ async function rewriteImports(directory: string): Promise<void> {
 
 /**
  * 加载插件内某个模块，例如 `tools/index.ts`、`session/presets.ts`。
- * `configJsonc` 可覆写副本里的 config.jsonc，用于验证配置错误下的行为。
+ * 默认把公开模板放入隔离的 Pi Agent 目录；`configJsonc` 可覆写运行配置，null 表示缺失。
  */
 export async function loadFirecodeModule(
 	entry: string,
 	options: {
-		configJsonc?: string;
+		configJsonc?: string | null;
 		replacements?: Record<string, string>;
 		extraFiles?: Record<string, string>;
 	} = {},
@@ -156,13 +157,18 @@ export async function loadFirecodeModule(
 	created.push(directory);
 	await cp(SOURCE_DIR, directory, { recursive: true });
 	await rm(join(directory, "tests"), { recursive: true, force: true });
-	if (options.configJsonc !== undefined)
-		await writeFile(join(directory, "config.jsonc"), options.configJsonc);
+	const agentDirectory = join(directory, "agent");
+	if (options.configJsonc !== null) {
+		const config = options.configJsonc ?? await readFile(join(directory, "config.example.jsonc"), "utf8");
+		const runtimeDirectory = join(agentDirectory, "extensions", "firecode");
+		await mkdir(runtimeDirectory, { recursive: true });
+		await writeFile(join(runtimeDirectory, "config.jsonc"), config);
+	}
 	for (const [path, content] of Object.entries(options.extraFiles ?? {})) {
 		const destination = join(directory, path);
 		await writeFile(destination, content);
 	}
-	await rewriteImports(directory);
+	await rewriteImports(directory, agentDirectory);
 	for (const [oldText, newText] of Object.entries(options.replacements ?? {})) {
 		const sourceEntry = entry.endsWith(".js") ? `${entry.slice(0, -3)}.ts` : entry;
 		const path = join(directory, sourceEntry);

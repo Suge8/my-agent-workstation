@@ -85,6 +85,8 @@ test("发行包只包含允许的资产范围", async () => {
 	expect(paths.length).toBeGreaterThan(0);
 	expect(paths.some((path) => excludedPath(relative(REPO, path)))).toBe(false);
 	expect(await exists(join(FIRECODE, "index.ts"))).toBe(true);
+	expect(await exists(join(FIRECODE, "config.example.jsonc"))).toBe(true);
+	expect(await exists(join(FIRECODE, "config.jsonc"))).toBe(false);
 	expect(await exists(join(FIRECODE, "AGENTS.md"))).toBe(true);
 	expect(await exists(join(FIRECODE, "CONTEXT.md"))).toBe(true);
 	expect(await exists(join(PI_CONFIG, "SYSTEM.md"))).toBe(true);
@@ -125,12 +127,11 @@ test("FireCode 通过现有 loader 接缝可加载", async () => {
 	expect(typeof module.default).toBe("function");
 });
 
-test("FireCode 发行配置不会用未认证示例发起模型调用", async () => {
+test("FireCode 公开模板不会启用需要认证或模型配置的能力", async () => {
 	const loader = await import("../packages/firecode/tests/loader.ts");
 	firecodeLoader = loader;
 	const module = await loader.loadFirecodeModule("config.ts");
 	const loaded = (module.loadConfig as () => { config: { features: Record<string, boolean> } })();
-	expect(loaded.config.features.presets).toBe(false);
-	expect(loaded.config.features.master).toBe(false);
-	expect(loaded.config.features.review).toBe(false);
+	for (const feature of ["claudeSub", "openaiNative", "master", "review"])
+		expect(loaded.config.features[feature]).toBe(false);
 });

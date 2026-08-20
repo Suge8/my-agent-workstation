@@ -111,14 +111,14 @@ export async function syncSources({ root = REPO, firecode, skills, system, check
 	skills = resolve(skills);
 	system = resolve(system);
 	if (checkClean) assertManagedPathsClean(root);
-	for (const source of [firecode, skills, system]) if (!await exists(source)) throw new Error(`维护源不存在：${source}`);
+	for (const source of [firecode, skills, system, join(firecode, "config.example.jsonc")])
+		if (!await exists(source)) throw new Error(`维护源不存在：${source}`);
 
-	const publicConfig = join(root, "packages", "firecode", "config.jsonc");
 	const publicAgents = join(root, "packages", "firecode", "AGENTS.md");
 	const portableLoader = join(root, "packages", "firecode", "tests", "loader.ts");
 	const searchSkill = join(root, "packages", "skills", "search", "search");
 	const setupSkill = join(root, "packages", "skills", "operations", "workstation-setup");
-	for (const overlay of [publicConfig, publicAgents, portableLoader, searchSkill, setupSkill]) {
+	for (const overlay of [publicAgents, portableLoader, searchSkill, setupSkill]) {
 		if (!await exists(overlay)) throw new Error(`发行覆盖层不存在：${overlay}`);
 	}
 
@@ -127,7 +127,6 @@ export async function syncSources({ root = REPO, firecode, skills, system, check
 	try {
 		const next = join(stage, "next");
 		await copyTree(firecode, join(next, "firecode"), (name) => name === "config.jsonc");
-		await copyFile(publicConfig, join(next, "firecode", "config.jsonc"));
 		await copyFile(publicAgents, join(next, "firecode", "AGENTS.md"));
 		await mkdir(join(next, "firecode", "tests"), { recursive: true });
 		await copyFile(portableLoader, join(next, "firecode", "tests", "loader.ts"));

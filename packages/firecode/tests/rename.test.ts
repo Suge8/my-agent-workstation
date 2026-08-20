@@ -1,12 +1,13 @@
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
+import { cleanupFirecodeModules, loadFirecodeModule } from "./loader.ts";
+
+afterEach(cleanupFirecodeModules);
 
 type CommandHandler = (args: string, ctx: unknown) => Promise<void> | void;
 type ShortcutHandler = (ctx: unknown) => Promise<void> | void;
 
 async function loadRenameSession() {
-	const { registerSessionName } = await import(
-		`../session/rename.ts?test=${crypto.randomUUID()}`
-	);
+	const { registerSessionName } = await loadFirecodeModule("session/rename.ts");
 	return registerSessionName as (pi: unknown) => void;
 }
 

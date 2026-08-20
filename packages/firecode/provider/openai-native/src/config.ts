@@ -1,5 +1,5 @@
 import { closeSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { parseJsonc } from "../../../config.js";
+import { parseJsonc } from "../../../jsonc.js";
 
 const TEXT_VERBOSITIES = ["low", "medium", "high"] as const;
 

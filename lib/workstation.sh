@@ -200,16 +200,11 @@ record_package_integrity() {
 }
 
 install_workstation_package() {
-  old_config="$STATE_HOME/firecode-config.jsonc"
-  if test -f "$PACKAGE_HOME/firecode/config.jsonc"; then
-    cp "$PACKAGE_HOME/firecode/config.jsonc" "$old_config"
-  fi
   temporary="$PACKAGE_HOME.tmp.$$"
   rm -rf "$temporary"
   mkdir -p "$temporary"
   cp -R "$ROOT/packages/firecode" "$temporary/firecode"
   cp -R "$ROOT/packages/skills" "$temporary/skills"
-  if test -f "$old_config"; then cp "$old_config" "$temporary/firecode/config.jsonc"; fi
   printf '%s\n' '{"name":"my-agent-workstation-pi","version":"0.1.0","private":true,"keywords":["pi-package"],"pi":{"extensions":["firecode/index.ts"],"skills":["skills"]}}' > "$temporary/package.json"
   rm -rf "$PACKAGE_HOME"
   mv "$temporary" "$PACKAGE_HOME"
@@ -273,7 +268,7 @@ configure_pi() {
     --ownership "$STATE_HOME/pi-managed.json" \
     --pi-settings "$PI_AGENT_HOME/settings.json" \
     --pi-keybindings "$PI_AGENT_HOME/keybindings.json" \
-    --firecode "$PACKAGE_HOME/firecode/config.jsonc"
+    --firecode "$PI_AGENT_HOME/extensions/firecode/config.jsonc"
   if test -n "$SELECTIONS"; then set -- "$@" --selections "$SELECTIONS"; fi
   node "$ROOT/scripts/configure-workstation.mjs" "$@" >/dev/null || return
   record_package_integrity || return
