@@ -19,6 +19,7 @@ WITH_SEARCH=0
 MIGRATE_HERDR=0
 SELECTIONS=
 FORCE_UPDATE=0
+UPDATE_FORWARD_ARGS=()
 . "$ROOT/lib/workstation.sh"
 
 usage() {
@@ -503,6 +504,7 @@ apply_plan() {
 main() {
   command=${1:-}
   if test -z "$command"; then workstation_wizard || exit; command=apply; else
+    if test "$command" = update; then UPDATE_FORWARD_ARGS=("${@:2}"); fi
     case "$command" in
       doctor|plan|apply|verify|update|repair|uninstall|configure-search) parse_options "$@" ;;
       -h|--help) usage; exit 0 ;;

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { constants } from "node:fs";
-import { access, chmod, copyFile, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { access, chmod, copyFile, lstat, mkdir, readFile, readdir, realpath, rename, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,7 +10,17 @@ const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const EXCLUDED = new Set([
 	".DS_Store", ".claude", ".git", "search-skills", "archive", "archives", "eval", "evals", "cache", "vendor", "node_modules", "__pycache__",
 ]);
-const PRIVATE = [/\/Users\/[^/\s]+(?:\/|$)/, /\/home\/[^/\s]+(?:\/|$)/, /~\/(?:\.agents|content-create)(?:\/|$)/];
+const PRIVATE = [/\/Users\/[^/\s]+(?:\/|$)/, /\/home\/[^/\s]+(?:\/|$)/, /~\/content-create(?:\/|$)/, /<(?:HOME|SKILL_ROOT|VIDEO_PROJECT)>/];
+const SECRETS = [
+	/-----BEGIN [A-Z ]+ PRIVATE KEY-----/,
+	/sk-(?!test(?:-|["']))[A-Za-z0-9-]{8,}/,
+	/gh[pousr]_[A-Za-z0-9]{20,}/,
+	/xox[baprs]-[A-Za-z0-9-]{12,}/,
+	/AKIA[0-9A-Z]{16}/,
+	/AIza[0-9A-Za-z_-]{35}/,
+	/(?:[A-Z][A-Z0-9_]*(?:API_KEY|ACCESS_TOKEN|SECRET_KEY|PASSWORD)|apiKey|accessToken|secretKey|password)\s*[:=]\s*["']?[A-Za-z0-9+/=_-]{16,}/,
+	/https:\/\/api\.day\.app\/(?!<key>)[A-Za-z0-9_-]{8,}\//,
+];
 
 async function exists(path) {
 	try {
@@ -21,34 +31,26 @@ async function exists(path) {
 	}
 }
 
-function sanitize(buffer) {
-	if (buffer.includes(0)) return buffer;
-	return Buffer.from(buffer.toString("utf8")
-		.replaceAll(/\/Users\/[^/\s"'`]+/g, "<HOME>")
-		.replaceAll(/\/home\/[^/\s"'`]+/g, "<HOME>")
-		.replaceAll("~/.agents", "<SKILL_ROOT>")
-		.replaceAll("~/content-create", "<VIDEO_PROJECT>")
-		.replaceAll(/https:\/\/[A-Za-z0-9]+-dsn\.algolia\.net/g, "https://<ALGOLIA_APP_ID>-dsn.algolia.net")
-		.replaceAll(/x-algolia-api-key=[^&\s"'`]+/g, "x-algolia-api-key=<ALGOLIA_API_KEY>")
-		.replaceAll(/x-algolia-application-id=[^&\s"'`]+/g, "x-algolia-application-id=<ALGOLIA_APP_ID>")
-		.replaceAll(/sk-[A-Za-z0-9-]{8,}/g, "fixture-key"));
-}
-
-async function copyTree(source, target, exclude = () => false) {
-	const sourceStat = await lstat(source);
-	if (sourceStat.isSymbolicLink()) throw new Error(`拒绝同步符号链接：${source}`);
+async function copyTree(source, target, exclude = () => false, ancestors = new Set()) {
+	let sourceStat = await lstat(source);
+	if (sourceStat.isSymbolicLink()) {
+		source = await realpath(source);
+		sourceStat = await lstat(source);
+	}
 	if (sourceStat.isDirectory()) {
+		const canonical = await realpath(source);
+		if (ancestors.has(canonical)) throw new Error(`维护源包含循环符号链接：${source}`);
+		const descendants = new Set(ancestors).add(canonical);
 		await mkdir(target, { recursive: true });
 		for (const entry of await readdir(source, { withFileTypes: true })) {
 			if (EXCLUDED.has(entry.name) || exclude(entry.name, source)) continue;
-			if (entry.isSymbolicLink()) throw new Error(`拒绝同步符号链接：${join(source, entry.name)}`);
-			await copyTree(join(source, entry.name), join(target, entry.name), exclude);
+			await copyTree(join(source, entry.name), join(target, entry.name), exclude, descendants);
 		}
 		return;
 	}
 	if (!sourceStat.isFile()) throw new Error(`不支持的维护源类型：${source}`);
 	await mkdir(dirname(target), { recursive: true });
-	await writeFile(target, sanitize(await readFile(source)));
+	await copyFile(source, target);
 	await chmod(target, sourceStat.mode & 0o777);
 }
 
@@ -70,7 +72,8 @@ async function assertPublic(paths) {
 			const content = await readFile(path);
 			if (content.includes(0)) continue;
 			const text = content.toString("utf8");
-			for (const pattern of PRIVATE) if (pattern.test(text)) throw new Error(`发行快照仍含私人路径：${path}`);
+			for (const pattern of PRIVATE) if (pattern.test(text)) throw new Error(`发行快照含不可发布路径或占位符：${path}`);
+			for (const pattern of SECRETS) if (pattern.test(text)) throw new Error(`发行快照疑似含明文凭据：${path}`);
 		}
 	}
 }
@@ -110,10 +113,11 @@ export async function syncSources({ root = REPO, firecode, skills, system, check
 	for (const source of [firecode, skills, system]) if (!await exists(source)) throw new Error(`维护源不存在：${source}`);
 
 	const publicConfig = join(root, "packages", "firecode", "config.jsonc");
+	const publicAgents = join(root, "packages", "firecode", "AGENTS.md");
 	const portableLoader = join(root, "packages", "firecode", "tests", "loader.ts");
 	const searchSkill = join(root, "packages", "skills", "search", "search");
 	const setupSkill = join(root, "packages", "skills", "operations", "workstation-setup");
-	for (const overlay of [publicConfig, portableLoader, searchSkill, setupSkill]) {
+	for (const overlay of [publicConfig, publicAgents, portableLoader, searchSkill, setupSkill]) {
 		if (!await exists(overlay)) throw new Error(`发行覆盖层不存在：${overlay}`);
 	}
 
@@ -123,6 +127,7 @@ export async function syncSources({ root = REPO, firecode, skills, system, check
 		const next = join(stage, "next");
 		await copyTree(firecode, join(next, "firecode"), (name) => name === "config.jsonc");
 		await copyFile(publicConfig, join(next, "firecode", "config.jsonc"));
+		await copyFile(publicAgents, join(next, "firecode", "AGENTS.md"));
 		await mkdir(join(next, "firecode", "tests"), { recursive: true });
 		await copyFile(portableLoader, join(next, "firecode", "tests", "loader.ts"));
 		await copyTree(skills, join(next, "skills"));

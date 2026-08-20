@@ -530,11 +530,7 @@ workstation_update_release() {
   fi
   updated=$(find "$work" -mindepth 1 -maxdepth 1 -type d -name 'my-agent-workstation-*' -print -quit)
   test -x "$updated/setup" || { rm -rf "$work"; return 1; }
-  if test "$JSON" -eq 1; then
-    MYAW_SKIP_SELF_UPDATE=1 "$updated/setup" update --yes --json
-  else
-    MYAW_SKIP_SELF_UPDATE=1 "$updated/setup" update --yes
-  fi
+  MYAW_SKIP_SELF_UPDATE=1 "$updated/setup" update "${UPDATE_FORWARD_ARGS[@]}"
   result=$?
   rm -rf "$work"
   return "$result"

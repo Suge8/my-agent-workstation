@@ -154,6 +154,8 @@ case "$name" in
         output=\${@: -1}
         printf '%s\\n' 'touch "$FAKE_STATE/herdr"' 'value=$(cat "$FAKE_STATE/herdr_latest" 2>/dev/null || printf "1.0.0")' 'printf "%s" "$value" > "$FAKE_STATE/herdr_version"' 'mkdir -p "$HOME/.local/bin"' 'ln -sf "$FAKE_COMMAND" "$HOME/.local/bin/herdr"' > "$output"
         ;;
+      *api.github.com/repos/*/releases/latest*) has release || exit 1; printf '{"tag_name":"v9.9.9"}\\n' ;;
+      *github.com/*/archive/refs/tags/*.tar.gz*) has release || exit 1; output=\${@: -1}; cp "$state/release.tar.gz" "$output" ;;
       *Homebrew/install*) log "$@"; printf 'touch "$FAKE_STATE/brew"\\n' ;;
       *) exit 1 ;;
     esac
@@ -164,6 +166,14 @@ esac
   chmodSync(dispatcher, 0o755);
   for (const name of ["uname", "sw_vers", "zsh", "node", "npm", "brew", "pi", "herdr", "bcu", "agent-browser", "cloakbrowser", "launchctl", "security", "curl"])
     symlinkSync("fake-command", join(bin, name));
+  if ("release" in state) {
+    const release = join(root, "release", "my-agent-workstation-9.9.9");
+    mkdirSync(release, { recursive: true });
+    const releaseSetup = join(release, "setup");
+    writeFileSync(releaseSetup, '#!/bin/bash\nprintf "updated %s\\n" "$*" >> "$FAKE_LOG"\n');
+    chmodSync(releaseSetup, 0o755);
+    expect(spawnSync("/usr/bin/tar", ["-czf", join(fakeState, "release.tar.gz"), "-C", join(root, "release"), "my-agent-workstation-9.9.9"]).status).toBe(0);
+  }
   const npmRoot = join(fakeState, "npm-root", "better-computer-use", "scripts");
   mkdirSync(npmRoot, { recursive: true });
   writeFileSync(join(npmRoot, "setup-helper.mjs"), `import { writeFileSync } from "node:fs"; writeFileSync(process.env.FAKE_STATE + "/bcu-helper", "");\n`);
@@ -410,6 +420,13 @@ describe("setup public CLI", () => {
     expect(f.run(["verify", "--json"]).status).toBe(1);
     expect(f.run(["repair", "--yes", "--json"]).status).toBe(0);
     expect(readFileSync(init, "utf8")).toContain("STARSHIP_CONFIG");
+  });
+
+  test("release update forwards the user's explicit conflict choices", () => {
+    const f = fixture(ready({ release: "" }));
+    const updated = f.run(["update", "--yes", "--json", "--replace-system", "--migrate-herdr"]);
+    expect(updated.status).toBe(0, updated.stderr);
+    expect(readFileSync(f.log, "utf8")).toContain("updated update --yes --json --replace-system --migrate-herdr");
   });
 
   test("update refreshes stable dependencies", () => {
