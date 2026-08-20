@@ -4,9 +4,40 @@
   "description": "A modular Pi extension for terminal UI, session workflows, adversarial review, and delegated agents",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Suge8/firecode.git"
+  },
+  "homepage": "https://github.com/Suge8/firecode#readme",
+  "bugs": {
+    "url": "https://github.com/Suge8/firecode/issues"
+  },
   "keywords": [
     "pi-package",
     "pi-extension"
+  ],
+  "files": [
+    "*.ts",
+    "config.example.jsonc",
+    "master/*.ts",
+    "provider/claude-sub.ts",
+    "provider/openai-native/index.ts",
+    "provider/openai-native/src/compact-client.ts",
+    "provider/openai-native/src/config.ts",
+    "provider/openai-native/src/extension.ts",
+    "provider/openai-native/src/native-compaction.ts",
+    "provider/openai-native/src/native-details.ts",
+    "provider/openai-native/src/native-replay.ts",
+    "provider/openai-native/src/native-runtime.ts",
+    "provider/openai-native/src/options.ts",
+    "provider/openai-native/src/request-pipeline.ts",
+    "provider/openai-native/src/responses-input.ts",
+    "!provider/openai-native/src/*.test.ts",
+    "review/*.ts",
+    "review/prompts/*.md",
+    "session/*.ts",
+    "statusbar/*.ts",
+    "tools/*.ts"
   ],
   "scripts": {
     "test": "bun test"

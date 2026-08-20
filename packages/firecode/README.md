@@ -5,10 +5,10 @@ FireCode 是一个模块化 Pi Package，提供终端状态与工具渲染、会
 ## 安装
 
 ```bash
-pi install /path/to/firecode
+pi install git:github.com/Suge8/firecode@v0.1.0
 ```
 
-也可在仓库中直接试用：
+也可在本地仓库中直接试用：
 
 ```bash
 pi -e .
@@ -23,7 +23,8 @@ Pi Package 拥有与 Pi 相同的本机权限；安装前应审阅源码。
 ```bash
 agent_dir="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
 mkdir -p "$agent_dir/extensions/firecode"
-cp config.example.jsonc "$agent_dir/extensions/firecode/config.jsonc"
+curl -fsSL https://raw.githubusercontent.com/Suge8/firecode/v0.1.0/config.example.jsonc \
+  -o "$agent_dir/extensions/firecode/config.jsonc"
 ```
 
 模板默认只启用本地界面与会话功能。Provider、Bark 通知、审查和子代理委派涉及外部服务或本机工具，配置完成后再开启。缺少运行配置时，FireCode 会关闭可选功能并在会话启动时警告；模板本身不会被运行时读取。

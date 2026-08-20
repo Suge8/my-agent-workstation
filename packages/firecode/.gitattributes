@@ -1,0 +1,13 @@
+/.gitattributes export-ignore
+/.gitignore export-ignore
+/AGENTS.md export-ignore
+/CONTEXT.md export-ignore
+/docs export-ignore
+/tests export-ignore
+/master/AGENTS.md export-ignore
+/provider/openai-native/AGENTS.md export-ignore
+/provider/openai-native/src/*.test.ts export-ignore
+/provider/openai-native/test export-ignore
+/review/AGENTS.md export-ignore
+/session/AGENTS.md export-ignore
+/statusbar/AGENTS.md export-ignore
