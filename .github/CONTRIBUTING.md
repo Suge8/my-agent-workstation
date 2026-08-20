@@ -15,3 +15,8 @@ Before opening a change:
    ```
 
 Include the commands and raw results in the pull request. Do not broaden platform support or add dependencies without evidence that the existing toolchain cannot solve the problem.
+
+Before a release:
+
+1. Run `./maintain sync` and review the generated diff. Active Skill symlinks are copied by value, so confirm their targets are intended public inputs.
+2. Run `bun run test:pi-smoke` on a machine with the current global Pi installed. This host-integration check is intentionally outside CI.

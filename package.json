@@ -10,7 +10,7 @@
   "scripts": {
     "test": "bun test --timeout 90000 tests packages/firecode/tests",
     "test:sync": "bun test --timeout 30000 tests/asset-integrity.test.ts tests/model-profile-disabled-presets.test.mjs tests/model-profile.test.mjs tests/sync-sources.test.ts tests/workstation-setup-skill.test.ts packages/firecode/tests",
-    "test:pi-smoke": "bun test packages/firecode/provider/openai-native/test/pi-smoke.test.ts",
+    "test:pi-smoke": "bun test --timeout 15000 packages/firecode/provider/openai-native/test/pi-smoke.test.ts",
     "test:bcu": "npm --prefix packages/better-computer-use test",
     "check:shell": "bash -n maintain setup lib/workstation.sh install.sh && shellcheck maintain setup lib/workstation.sh install.sh"
   }
