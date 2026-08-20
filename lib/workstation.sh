@@ -262,6 +262,16 @@ available_models() {
   pi --list-models 2>/dev/null | awk 'NR > 1 && $1 != "provider" { print $1 "/" $2 }' | paste -sd, -
 }
 
+full_recommendation_ready() {
+  complete_providers=${ready_providers:-}
+  complete_models=${ready_models:-}
+  set -- --mode check-complete --profile "$ROOT/resources/models/recommended.json" --providers "$complete_providers" --available-models "$complete_models"
+  complete_selections=${SELECTIONS:-}
+  test -n "$complete_selections" || complete_selections="$STATE_HOME/model-selections.json"
+  if test -f "$complete_selections"; then set -- "$@" --selections "$complete_selections"; fi
+  node "$ROOT/scripts/configure-workstation.mjs" "$@" >/dev/null 2>&1
+}
+
 configure_pi() {
   mkdir -p "$PI_AGENT_HOME"
   if { owns_component pi-settings || owns_component pi-keybindings || owns_component firecode-config; } && test ! -f "$STATE_HOME/pi-managed.json"; then
@@ -516,6 +526,12 @@ remove_managed_block() {
 
 workstation_uninstall() {
   mkdir -p "$STATE_HOME"
+  if owns_component pi-settings || owns_component pi-keybindings || owns_component firecode-config; then
+    node "$ROOT/scripts/configure-workstation.mjs" --mode validate --ownership "$STATE_HOME/pi-managed.json" >/dev/null 2>&1 || {
+      printf 'Pi/FireCode 配置接管清单缺失或损坏；卸载未改动任何内容，backups 已保留。\n' >&2
+      return 1
+    }
+  fi
   if test -d "$PACKAGE_HOME"; then
     pi remove "$PACKAGE_HOME" >/dev/null 2>&1 || return
     rm -rf "$PACKAGE_HOME" || return

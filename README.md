@@ -46,7 +46,7 @@ Maintainers can run `./setup` from a checkout. The wizard offers:
 
 The installed `workstation-setup` Skill delegates to the same control plane. Brave and Exa read environment variables first, then macOS Keychain; Context7 keeps its own OAuth. Secrets never enter shell configuration, state files, or the repository.
 
-Provider readiness is checked with `pi auth check --no-refresh`. Full mode writes the complete recommendation when all providers are ready; unavailable roles are not left broken. Follow the [model selection format](resources/models/README.md) and pass `--selections <json>` to replace recommended models. Selections, user-edited FireCode fields, unrelated Pi settings, and custom presets survive updates.
+Provider readiness is checked with `pi auth check --no-refresh`. Full mode starts changing the machine only when authentication or explicit replacements can produce the complete recommendation; otherwise it stops clearly. Follow the [model selection format](resources/models/README.md) and pass `--selections <json>` to replace recommended models. Selections, user-edited managed Pi/FireCode fields, unrelated settings, and custom presets survive updates.
 
 Agents pass `--architecture-language zh|en` from the conversation language; non-interactive Shell defaults to Chinese. The persisted choice survives update and repair, while an explicit new value atomically switches the sole active variant.
 

@@ -46,7 +46,7 @@ curl -fsSL https://raw.githubusercontent.com/Suge8/my-agent-workstation/main/ins
 
 安装后的 `workstation-setup` Skill 会调用同一套命令，不复制安装逻辑。Brave 与 Exa 优先读取环境变量，其次读取 macOS 钥匙串；Context7 使用自身 OAuth。密钥不会进入 Shell 配置、状态文件或仓库。
 
-模型供应商先由 `pi auth check --no-refresh` 检测。已认证模型会生成 Pi、FireCode 预设、Master 与 Review 配置；完整同款在认证齐备时当场生成完整推荐配置，不可用模型不会留下假成功配置。需要替换推荐模型时按[模型选择说明](resources/models/README.md)通过 `--selections <json>` 提供选择，安装器会保存并在更新时复用；用户修改过的 FireCode 字段、无关 Pi 设置和自定义预设保持不变。
+模型供应商先由 `pi auth check --no-refresh` 检测。已认证模型会生成 Pi、FireCode 预设、Master 与 Review 配置；完整同款只有在认证或显式模型替换能组成完整推荐配置时才开始变更，否则明确停止。需要替换推荐模型时按[模型选择说明](resources/models/README.md)通过 `--selections <json>` 提供选择，安装器会保存并在更新时复用；用户修改过的受管理 Pi/FireCode 字段、无关设置和自定义预设保持不变。
 
 Agent 会按对话语言传 `--architecture-language zh|en`；纯 Shell 非交互安装默认中文，选择会写入状态并由更新、修复沿用。再次显式传参可原子切换，Pi 始终只加载一个变体。
 

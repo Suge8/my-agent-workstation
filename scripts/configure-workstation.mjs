@@ -13,9 +13,13 @@ function args(argv) {
 		if (!flag?.startsWith("--") || value === undefined) throw new Error(`参数无效：${flag ?? ""}`);
 		options[flag.slice(2)] = value;
 	}
-	const required = options.mode === "restore"
-		? ["pi-settings", "pi-keybindings", "pi-settings-backup", "pi-keybindings-backup", "firecode", "ownership"]
-		: ["profile", "pi-settings", "pi-keybindings", "firecode", "ownership"];
+	const required = options.mode === "validate"
+		? ["ownership"]
+		: options.mode === "check-complete"
+			? ["profile", "providers", "available-models"]
+			: options.mode === "restore"
+				? ["pi-settings", "pi-keybindings", "pi-settings-backup", "pi-keybindings-backup", "firecode", "ownership"]
+				: ["profile", "pi-settings", "pi-keybindings", "firecode", "ownership"];
 	for (const name of required) if (!options[name]) throw new Error(`缺少 --${name}`);
 	return options;
 }
@@ -47,26 +51,6 @@ async function writeRestored(path, value, absentBeforeInstall) {
 	await atomicJson(path, value);
 }
 
-function restoreKeys(current, baseline, keys) {
-	const restored = { ...current };
-	for (const key of keys) {
-		if (Object.hasOwn(baseline, key)) restored[key] = baseline[key];
-		else delete restored[key];
-	}
-	return restored;
-}
-
-function restoreSettings(current, baseline, managed) {
-	const topLevel = managed.filter((key) => !key.includes("."));
-	const restored = restoreKeys(current, baseline, topLevel);
-	if (managed.includes("warnings.anthropicExtraUsage")) {
-		const warnings = restoreKeys(restored.warnings ?? {}, baseline.warnings ?? {}, ["anthropicExtraUsage"]);
-		if (Object.keys(warnings).length) restored.warnings = warnings;
-		else delete restored.warnings;
-	}
-	return restored;
-}
-
 const FIRECODE_PATHS = [
 	...["header", "statusbar", "tools", "presets", "rename", "stats", "claudeSub", "openaiNative", "workingFlame", "bark", "review", "master"].map((name) => ["features", name]),
 	["openai", "nativeCompaction"], ["openai", "providers", "openai-codex", "textVerbosity"], ["openai", "providers", "openai-codex", "priority"], ["openai", "providers", "xai", "priority"],
@@ -86,12 +70,63 @@ function same(left, right) {
 	return left.exists === right.exists && (!left.exists || JSON.stringify(left.value) === JSON.stringify(right.value));
 }
 
+function ownershipEntries(value, label) {
+	if (!Array.isArray(value)) throw new Error(`${label} 接管清单损坏`);
+	const paths = new Set();
+	for (const entry of value) {
+		const path = JSON.stringify(entry?.path);
+		if (!entry || !Array.isArray(entry.path) || !entry.path.length || entry.path.some((key) => typeof key !== "string" || ["__proto__", "prototype", "constructor"].includes(key)) ||
+			typeof entry.baseline?.exists !== "boolean" || typeof entry.applied?.exists !== "boolean" ||
+			(entry.baseline.exists && !Object.hasOwn(entry.baseline, "value")) || (entry.applied.exists && !Object.hasOwn(entry.applied, "value")) ||
+			(entry.relinquished !== undefined && typeof entry.relinquished !== "boolean") || paths.has(path)) throw new Error(`${label} 接管清单损坏`);
+		paths.add(path);
+	}
+	return value;
+}
+
+async function readOwnership(path, required = false) {
+	if (!existsSync(path)) {
+		if (required) throw new Error("Pi/FireCode 配置接管清单缺失；已保留 backups");
+		return { version: 1, settings: [], keybindings: [], firecode: [] };
+	}
+	const ownership = await readObject(path);
+	if (ownership.version !== 1) throw new Error("Pi/FireCode 配置接管清单版本损坏；已保留 backups");
+	ownership.settings = ownershipEntries(ownership.settings, "Pi settings");
+	ownership.keybindings = ownershipEntries(ownership.keybindings, "Pi keybindings");
+	ownership.firecode = ownershipEntries(ownership.firecode, "FireCode");
+	if (typeof ownership.firecodeAbsent !== "boolean") throw new Error("FireCode 配置接管清单损坏");
+	return ownership;
+}
+
 function setAt(object, path, state) {
 	let target = object;
 	for (const key of path.slice(0, -1)) target = target[key] ??= {};
 	const key = path.at(-1);
 	if (state.exists) target[key] = state.value;
 	else delete target[key];
+}
+
+function reconcileManaged(current, rendered, paths, previousEntries) {
+	const previous = new Map(previousEntries.map((entry) => [JSON.stringify(entry.path), entry]));
+	const all = new Map([...paths, ...previousEntries.map((entry) => entry.path)].map((path) => [JSON.stringify(path), path]));
+	const entries = [];
+	for (const [key, path] of all) {
+		const prior = previous.get(key);
+		const currentValue = valueAt(current, path);
+		if (prior?.relinquished || (prior && !same(currentValue, prior.applied))) {
+			setAt(rendered, path, currentValue);
+			entries.push({ ...(prior ?? {}), path, baseline: prior?.baseline ?? currentValue, applied: prior?.applied ?? valueAt(rendered, path), relinquished: true });
+			continue;
+		}
+		entries.push({ path, baseline: prior?.baseline ?? currentValue, applied: valueAt(rendered, path), relinquished: false });
+	}
+	return entries;
+}
+
+function restoreManaged(current, entries) {
+	for (const entry of entries) {
+		if (!entry.relinquished && same(valueAt(current, entry.path), entry.applied)) setAt(current, entry.path, entry.baseline);
+	}
 }
 
 function prune(object) {
@@ -106,29 +141,24 @@ function prune(object) {
 
 export async function restore(options) {
 	const ownershipPath = resolve(options.ownership);
-	if (!existsSync(ownershipPath)) throw new Error("Pi 配置接管清单缺失；已保留 backups，请恢复清单或手动回退");
 	const settingsPath = resolve(options["pi-settings"]);
 	const keybindingsPath = resolve(options["pi-keybindings"]);
 	const settingsBackup = resolve(options["pi-settings-backup"]);
 	const keybindingsBackup = resolve(options["pi-keybindings-backup"]);
 	const firecodePath = resolve(options.firecode);
-	const [settings, keybindings, firecode, baselineSettings, baselineKeybindings, ownership] = await Promise.all([
+	const [settings, keybindings, firecode, ownership] = await Promise.all([
 		readObject(settingsPath),
 		readObject(keybindingsPath),
 		readObject(firecodePath, true),
-		readObject(settingsBackup),
-		readObject(keybindingsBackup),
-		readObject(ownershipPath),
+		readOwnership(ownershipPath, true),
 	]);
-	const restoredSettings = restoreSettings(settings, baselineSettings, ownership.settings ?? []);
-	const restoredKeybindings = restoreKeys(keybindings, baselineKeybindings, ownership.keybindings ?? []);
-	for (const entry of ownership.firecode ?? []) {
-		if (same(valueAt(firecode, entry.path), entry.applied)) setAt(firecode, entry.path, entry.baseline);
-	}
-	prune(firecode);
+	restoreManaged(settings, ownership.settings);
+	restoreManaged(keybindings, ownership.keybindings);
+	restoreManaged(firecode, ownership.firecode);
+	prune(settings); prune(keybindings); prune(firecode);
 	await Promise.all([
-		writeRestored(settingsPath, restoredSettings, existsSync(`${settingsBackup}.absent`)),
-		writeRestored(keybindingsPath, restoredKeybindings, existsSync(`${keybindingsBackup}.absent`)),
+		writeRestored(settingsPath, settings, existsSync(`${settingsBackup}.absent`)),
+		writeRestored(keybindingsPath, keybindings, existsSync(`${keybindingsBackup}.absent`)),
 		writeRestored(firecodePath, firecode, ownership.firecodeAbsent === true),
 	]);
 }
@@ -179,6 +209,17 @@ function baseConfiguration(profile, providers, settings, keybindings, firecode) 
 			keys: { ...(firecode.keys ?? {}), ...profile.firecodeKeys },
 		},
 	};
+}
+
+function recommendationIsComplete(profile, providers, available, supplied) {
+	const providerSet = new Set(providers);
+	const availableSet = new Set(available);
+	if (["presets", "master", "review"].some((capability) => supplied.disabled?.includes(capability))) return false;
+	return Object.entries(profile.models).every(([alias, model]) => {
+		const selected = Object.hasOwn(supplied.models ?? {}, alias) ? supplied.models[alias] : modelRef(model);
+		if (selected === null || typeof selected !== "string" || !selected.includes("/")) return false;
+		return providerSet.has(selected.slice(0, selected.indexOf("/"))) && availableSet.has(selected);
+	});
 }
 
 function automaticSelections(profile, providers, available, supplied) {
@@ -235,28 +276,17 @@ export async function configure(options) {
 		}
 	}
 	const ownershipPath = resolve(options.ownership);
-	const previousOwnership = await readObject(ownershipPath);
-	const previousFirecode = new Map((previousOwnership.firecode ?? []).map((entry) => [entry.path.join("."), entry]));
-	const managedFirecode = [];
-	for (const path of [...FIRECODE_PATHS, ...Object.keys(profile.presets).map((name) => ["presets", name])]) {
-		const key = path.join(".");
-		const previous = previousFirecode.get(key);
-		const current = valueAt(firecode, path);
-		if (previous && !same(current, previous.applied)) {
-			setAt(rendered.firecode, path, current);
-			continue;
-		}
-		const applied = valueAt(rendered.firecode, path);
-		managedFirecode.push({ path, baseline: previous?.baseline ?? current, applied });
-	}
-	prune(rendered.firecode);
-	const managedSettings = new Set(previousOwnership.settings ?? []);
-	managedSettings.add("warnings.anthropicExtraUsage");
+	const previousOwnership = await readOwnership(ownershipPath);
+	const settingsPaths = [["warnings", "anthropicExtraUsage"]];
 	if (managesModels) {
-		for (const key of ["defaultProvider", "defaultModel", "defaultThinkingLevel", "enabledModels"]) managedSettings.add(key);
+		for (const key of ["defaultProvider", "defaultModel", "defaultThinkingLevel", "enabledModels"]) settingsPaths.push([key]);
 	}
-	const managedKeybindings = new Set(previousOwnership.keybindings ?? []);
-	for (const key of Object.keys(profile.keybindings)) managedKeybindings.add(key);
+	const keybindingPaths = Object.keys(profile.keybindings).map((key) => [key]);
+	const firecodePaths = [...FIRECODE_PATHS, ...Object.keys(profile.presets).map((name) => ["presets", name])];
+	const managedSettings = reconcileManaged(settings, rendered.piSettings, settingsPaths, previousOwnership.settings);
+	const managedKeybindings = reconcileManaged(keybindings, rendered.piKeybindings, keybindingPaths, previousOwnership.keybindings);
+	const managedFirecode = reconcileManaged(firecode, rendered.firecode, firecodePaths, previousOwnership.firecode);
+	prune(rendered.piSettings); prune(rendered.piKeybindings); prune(rendered.firecode);
 	const firecodeAbsent = previousOwnership.firecodeAbsent ?? !existsSync(firecodePath);
 	await Promise.all([
 		atomicJson(settingsPath, rendered.piSettings),
@@ -264,17 +294,39 @@ export async function configure(options) {
 		atomicJson(firecodePath, rendered.firecode),
 	]);
 	await atomicJson(ownershipPath, {
-		settings: [...managedSettings],
-		keybindings: [...managedKeybindings],
+		version: 1,
+		settings: managedSettings,
+		keybindings: managedKeybindings,
 		firecodeAbsent,
 		firecode: managedFirecode,
 	});
 	return { configuredModels: rendered.piSettings.enabledModels?.length ?? 0, providers };
 }
 
+async function checkComplete(options) {
+	const [profile, supplied] = await Promise.all([
+		readObject(resolve(options.profile)),
+		options.selections ? readObject(resolve(options.selections)) : {},
+	]);
+	const complete = recommendationIsComplete(
+		profile,
+		options.providers.split(",").filter(Boolean),
+		options["available-models"].split(",").filter(Boolean),
+		supplied,
+	);
+	if (!complete) throw new Error("完整同款需要可用的完整推荐配置；请先完成模型认证，或显式提供模型替换");
+	return { complete: true };
+}
+
 if (process.argv[1] && resolve(fileURLToPath(import.meta.url)) === resolve(process.argv[1])) {
 	const options = args(process.argv.slice(2));
-	const operation = options.mode === "restore" ? restore(options) : configure(options);
+	const operation = options.mode === "restore"
+		? restore(options)
+		: options.mode === "validate"
+			? readOwnership(resolve(options.ownership), true)
+			: options.mode === "check-complete"
+				? checkComplete(options)
+				: configure(options);
 	operation
 		.then((result) => process.stdout.write(`${JSON.stringify(result ?? { restored: true })}\n`))
 		.catch((error) => {

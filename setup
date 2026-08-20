@@ -207,6 +207,7 @@ detect() {
 
   MODEL_AUTH_STATUS=missing
   ready_providers=$(authenticated_providers)
+  ready_models=$(available_models)
   test -z "$ready_providers" || MODEL_AUTH_STATUS=normal
 
   BCU_PERMISSION_STATUS=missing
@@ -397,6 +398,7 @@ is_valid() {
   test "$INTEGRATION_STATUS" = normal || return 1
   test "$PACKAGE_STATUS" = normal || return 1
   test "$ARCHITECTURE_STATUS" = normal || return 1
+  if test "$MODE" = full; then full_recommendation_ready || return 1; fi
   if owns_component system; then test "$SYSTEM_STATUS" = normal || return 1; fi
   if test "$WITH_BCU" -eq 1; then test "$BCU_PERMISSION_STATUS" = normal || return 1; fi
   if test "$WITH_BROWSER" -eq 1; then test "$BROWSER_STATUS" = normal || return 1; fi
@@ -452,12 +454,24 @@ fs.renameSync(temporary, process.env.STATE_FILE);
 NODE
 }
 
+load_architecture_language() {
+  test -f "$STATE_HOME/state.json" || return 0
+  stored_architecture_language=$(STATE_FILE="$STATE_HOME/state.json" node -e '
+    const s=JSON.parse(require("fs").readFileSync(process.env.STATE_FILE,"utf8"));
+    const language=s.architecture_language||"zh";
+    if (!["zh","en"].includes(language)) process.exit(1);
+    process.stdout.write(language);
+  ' 2>/dev/null) || return 1
+  if test "$ARCHITECTURE_LANGUAGE_EXPLICIT" -eq 0; then ARCHITECTURE_LANGUAGE=$stored_architecture_language; fi
+}
+
 load_state_options() {
   test -f "$STATE_HOME/state.json" || return 0
   value=$(STATE_FILE="$STATE_HOME/state.json" node -e '
     const s=JSON.parse(require("fs").readFileSync(process.env.STATE_FILE,"utf8"));
-    const x=s.selected||{};
-    process.stdout.write([s.mode||"core",x.bcu?1:0,x.browser?1:0,x.terminal?1:0,x.helium?1:0,s.architecture_language||"zh"].join(" "));
+    const x=s.selected||{},language=s.architecture_language||"zh";
+    if (!["zh","en"].includes(language)) process.exit(1);
+    process.stdout.write([s.mode||"core",x.bcu?1:0,x.browser?1:0,x.terminal?1:0,x.helium?1:0,language].join(" "));
   ' 2>/dev/null) || return 1
   IFS=' ' read -r MODE WITH_BCU WITH_BROWSER WITH_TERMINAL WITH_HELIUM stored_architecture_language <<EOF
 $value
@@ -471,6 +485,10 @@ guard_apply() {
   if test "$NODE_STATUS" = conflict; then printf '%s\n' 'Node/npm 工具链不完整；请修复后重试。' >&2; return 3; fi
   if test "$PI_STATUS" = conflict && test "$PI_SOURCE" != homebrew && test "$PI_SOURCE" != npm+homebrew; then
     if test "$PI_SOURCE" = source; then printf '%s\n' '检测到源码 Pi；为避免覆盖已拒绝应用。' >&2; else printf '%s\n' 'npm Pi 命令不可用；请检查 PATH。' >&2; fi
+    return 3
+  fi
+  if test "$MODE" = full && ! full_recommendation_ready; then
+    printf '%s\n' '完整同款需要可用的完整推荐配置；请先完成模型认证，或显式提供模型替换。' >&2
     return 3
   fi
   if test "$FIRECODE_STATUS" = independent && test "$MIGRATE_FIRECODE" -ne 1; then
@@ -533,6 +551,7 @@ main() {
   fi
   case "$command" in
     update|repair|verify|uninstall) load_state_options || { printf '状态文件损坏。\n' >&2; exit 3; } ;;
+    doctor|plan|apply) load_architecture_language || { printf '状态文件损坏。\n' >&2; exit 3; } ;;
   esac
   case "$command" in
     update) FORCE_UPDATE=1; prepare_update_system || exit ;;

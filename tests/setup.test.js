@@ -209,6 +209,13 @@ function ready(overrides = {}) {
   return { brew: "", pi_npm: "", pi_version: "1.0.0", pi_latest: "1.0.0", herdr: "", herdr_version: "1.0.0", service: "", integration: "", ...overrides };
 }
 
+function completeAuth(overrides = {}) {
+  return ready({
+    "auth-openai-codex": "", "auth-anthropic": "", "auth-xai": "", "auth-deepseek": "",
+    "auth-kimi-coding": "", "auth-antigravity": "", ...overrides,
+  });
+}
+
 function apply(f, mode = "core", extra = ["--keep-system"]) {
   return f.run(["apply", "--mode", mode, "--yes", "--json", ...extra]);
 }
@@ -281,6 +288,8 @@ describe("setup public CLI", () => {
     const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
     settings.custom = "changed after install";
     settings.addedAfterInstall = true;
+    settings.defaultProvider = "user-provider";
+    settings.defaultModel = "user-model";
     settings.warnings.keepAfterInstall = true;
     writeFileSync(settingsPath, `${JSON.stringify(settings)}\n`);
     const keybindingsPath = join(agent, "keybindings.json");
@@ -295,17 +304,23 @@ describe("setup public CLI", () => {
     firecode.custom = { retained: true };
     writeFileSync(firecodePath, `${JSON.stringify(firecode)}\n`);
     expect(f.run(["update", "--yes", "--json"]).status).toBe(0);
+    expect(f.run(["update", "--yes", "--json"]).status).toBe(0);
     expect(JSON.parse(readFileSync(firecodePath, "utf8")).features.header).toBe(false);
+    expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toMatchObject({ defaultProvider: "user-provider", defaultModel: "user-model" });
+    expect(JSON.parse(readFileSync(keybindingsPath, "utf8"))["app.model.cycleForward"]).toEqual(["ctrl+m"]);
     expect(f.run(["uninstall", "--yes", "--json"]).status).toBe(0);
     expect(readFileSync(join(agent, "SYSTEM.md"), "utf8")).toBe("original system\n");
     expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({
       custom: "changed after install",
       addedAfterInstall: true,
+      defaultProvider: "user-provider",
+      defaultModel: "user-model",
       warnings: { keepAfterInstall: true },
     });
     expect(JSON.parse(readFileSync(keybindingsPath, "utf8"))).toEqual({
       custom: "changed after install",
       addedAfterInstall: ["ctrl+x"],
+      "app.model.cycleForward": ["ctrl+m"],
     });
     expect(readFileSync(join(agent, "bark-key"), "utf8")).toBe("original bark\n");
     expect(JSON.parse(readFileSync(firecodePath, "utf8"))).toEqual({ features: { header: false }, custom: { retained: true } });
@@ -325,6 +340,8 @@ describe("setup public CLI", () => {
     expect(result.stderr).toContain("接管清单");
     expect(existsSync(join(f.managed, "backups", "pi-settings.json.absent"))).toBe(true);
     expect(existsSync(join(f.managed, "ownership", "pi-settings"))).toBe(true);
+    expect(existsSync(join(f.managed, "pi-package", "package.json"))).toBe(true);
+    expect(existsSync(join(f.fakeState, "workstation_package"))).toBe(true);
   });
 
   test("damaged configuration ownership fails closed", () => {
@@ -332,11 +349,13 @@ describe("setup public CLI", () => {
     expect(apply(f).status).toBe(0);
     const ownership = join(f.managed, "pi-managed.json");
     writeFileSync(ownership, "{damaged\n");
-    const result = f.run(["repair", "--yes", "--json"]);
+    const result = f.run(["uninstall", "--yes", "--json"]);
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("动作失败: configure_pi");
+    expect(result.stderr).toContain("接管清单");
     expect(existsSync(join(f.managed, "backups", "firecode-config.jsonc.absent"))).toBe(true);
     expect(existsSync(join(f.managed, "ownership", "firecode-config"))).toBe(true);
+    expect(existsSync(join(f.managed, "pi-package", "package.json"))).toBe(true);
+    expect(existsSync(join(f.fakeState, "workstation_package"))).toBe(true);
   });
 
   test("managed SYSTEM updates only while untouched and detaches when kept", () => {
@@ -359,7 +378,7 @@ describe("setup public CLI", () => {
   });
 
   test("full mode installs an independent BCU package and terminal fragments without duplicating markers", () => {
-    const f = fixture(ready());
+    const f = fixture(completeAuth());
     const first = apply(f, "full");
     expect(first.status).toBe(0, first.stderr);
     const ghostty = join(f.home, ".config", "ghostty", "config");
@@ -423,10 +442,7 @@ describe("setup public CLI", () => {
   });
 
   test("full mode generates the complete current FireCode recommendation when providers are ready", () => {
-    const f = fixture(ready({
-      "auth-openai-codex": "", "auth-anthropic": "", "auth-xai": "", "auth-deepseek": "",
-      "auth-kimi-coding": "", "auth-antigravity": "",
-    }));
+    const f = fixture(completeAuth());
     expect(apply(f, "full").status).toBe(0);
     const config = JSON.parse(readFileSync(join(f.home, ".pi", "agent", "extensions", "firecode", "config.jsonc"), "utf8"));
     expect(Object.keys(config.presets)).toEqual(["fable", "opus5", "sol", "gemini", "ds", "k3-256", "xai"]);
@@ -447,6 +463,10 @@ describe("setup public CLI", () => {
     expect(readFileSync(skill, "utf8")).toContain("Code is the source of truth");
     expect(JSON.parse(readFileSync(join(f.managed, "state.json"), "utf8")).architecture_language).toBe("en");
     expect(f.run(["update", "--yes", "--json"]).status).toBe(0);
+    expect(readFileSync(skill, "utf8")).toContain("Code is the source of truth");
+    const doctor = json(f.run(["doctor", "--json"]));
+    expect(doctor.workstation.architecture_wiki).toEqual({ status: "normal", language: "en" });
+    expect(apply(f).status).toBe(0);
     expect(readFileSync(skill, "utf8")).toContain("Code is the source of truth");
   });
 
@@ -489,6 +509,15 @@ describe("setup public CLI", () => {
     expect(existsSync(join(f.managed, "backups", "independent-firecode", "index.ts"))).toBe(true);
   });
 
+  test("full mode stops before mutation when the complete model recommendation is unavailable", () => {
+    const f = fixture(ready());
+    const result = apply(f, "full");
+    expect(result.status).toBe(3);
+    expect(result.stderr).toContain("完整推荐配置");
+    expect(existsSync(f.managed)).toBe(false);
+    expect(existsSync(f.log)).toBe(false);
+  });
+
   test("runtime FireCode configuration write failures fail apply", () => {
     const f = fixture(ready({ "auth-openai-codex": "" }));
     const agent = join(f.home, ".pi", "agent");
@@ -514,7 +543,7 @@ describe("setup public CLI", () => {
   });
 
   test("repair restores missing and locally corrupted managed assets", () => {
-    const f = fixture(ready());
+    const f = fixture(completeAuth());
     expect(apply(f, "full").status).toBe(0);
     const skill = join(f.managed, "pi-package", "skills", "operations", "workstation-setup", "SKILL.md");
     const terminal = join(f.managed, "config", "ghostty.conf");
@@ -559,7 +588,7 @@ describe("setup public CLI", () => {
   });
 
   test("pre-existing BCU and Herdr integration remain external on uninstall", () => {
-    const f = fixture(ready({ bcu: "" }));
+    const f = fixture(completeAuth({ bcu: "" }));
     expect(apply(f, "full").status).toBe(0);
     expect(f.run(["uninstall", "--yes", "--json"]).status).toBe(0);
     expect(existsSync(join(f.fakeState, "bcu"))).toBe(true);
@@ -580,7 +609,7 @@ describe("setup public CLI", () => {
   });
 
   test("full mode refuses ready state until BCU permissions are usable", () => {
-    const f = fixture(ready({ bcu_permissions_missing: "" }));
+    const f = fixture(completeAuth({ bcu_permissions_missing: "" }));
     const result = apply(f, "full");
     expect(result.status).toBe(1);
     expect(JSON.parse(result.stdout).valid).toBe(false);
