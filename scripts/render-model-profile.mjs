@@ -107,8 +107,10 @@ export function renderModelProfile({
   const currentPresets = object(currentFirecode.presets ?? {}, "FireCode presets");
   const managedPresets = new Set(Object.keys(profile.presets));
   const customPresets = {};
-  for (const [name, preset] of Object.entries(currentPresets)) {
-    if (!managedPresets.has(name)) customPresets[name] = object(preset, `FireCode preset ${name}`);
+  if (features.presets !== false) {
+    for (const [name, preset] of Object.entries(currentPresets)) {
+      if (!managedPresets.has(name)) customPresets[name] = object(preset, `FireCode preset ${name}`);
+    }
   }
   const presets = {};
   if (!disabled.has("presets")) {
