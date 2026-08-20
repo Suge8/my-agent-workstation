@@ -109,16 +109,20 @@ export type LoadedConfig = {
 
 export const CONFIG_PATH = join(getAgentDir(), "extensions", "firecode", "config.jsonc");
 
+function disabledFeatures(): Record<Feature, false> {
+	return Object.fromEntries(FEATURES.map((feature) => [feature, false])) as Record<Feature, false>;
+}
+
 function readFile(problems: string[]): Record<string, unknown> {
 	if (!existsSync(CONFIG_PATH)) {
 		problems.push("config.jsonc 不存在，已关闭可选功能");
-		return { features: Object.fromEntries(FEATURES.map((feature) => [feature, false])) };
+		return { features: disabledFeatures() };
 	}
 	try {
 		const parsed: unknown = parseJsonc(readFileSync(CONFIG_PATH, "utf8"));
 		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
 			problems.push("config.jsonc 顶层必须是对象");
-			return {};
+			return { features: disabledFeatures() };
 		}
 		return parsed as Record<string, unknown>;
 	} catch (error) {
@@ -126,7 +130,7 @@ function readFile(problems: string[]): Record<string, unknown> {
 		// 不能因为消息文本不带节名就被当成无关问题过滤掉。
 		const message = error instanceof Error ? error.message : String(error);
 		problems.push(`config.jsonc 解析失败：${message}`);
-		return {};
+		return { features: disabledFeatures() };
 	}
 }
 
@@ -189,7 +193,7 @@ export function loadConfig(): LoadedConfig {
 	const invalidFeatures = raw.features !== undefined && !isPlainObject(raw.features);
 	if (invalidFeatures) problems.push("features 必须是对象");
 	const features: Partial<Record<Feature, boolean>> = invalidFeatures
-		? Object.fromEntries(FEATURES.map((feature) => [feature, false]))
+		? disabledFeatures()
 		: asRecord(raw.features);
 	const rawKeys = asRecord(raw.keys);
 	const presets = asRecord(raw.presets) as Record<string, Preset>;

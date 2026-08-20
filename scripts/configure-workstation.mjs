@@ -93,8 +93,17 @@ function modelRef(model) {
 	return `${model.provider}/${model.model}`;
 }
 
+const FIRECODE_OPENAI_DEFAULTS = {
+	nativeCompaction: true,
+	providers: {
+		"openai-codex": { textVerbosity: "low", priority: true },
+		xai: { priority: true },
+	},
+};
+
 function baseConfiguration(profile, providers, settings, keybindings, firecode) {
 	const providerSet = new Set(providers);
+	const currentOpenAI = firecode.openai ?? {};
 	return {
 		piSettings: {
 			...settings,
@@ -103,6 +112,11 @@ function baseConfiguration(profile, providers, settings, keybindings, firecode) 
 		piKeybindings: { ...keybindings, ...profile.keybindings },
 		firecode: {
 			...firecode,
+			openai: {
+				...FIRECODE_OPENAI_DEFAULTS,
+				...currentOpenAI,
+				providers: { ...FIRECODE_OPENAI_DEFAULTS.providers, ...(currentOpenAI.providers ?? {}) },
+			},
 			features: {
 				...(firecode.features ?? {}),
 				header: true,

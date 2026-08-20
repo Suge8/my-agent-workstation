@@ -380,6 +380,13 @@ describe("setup public CLI", () => {
     const firecode = JSON.parse(readFileSync(join(agent, "extensions", "firecode", "config.jsonc"), "utf8"));
     expect(firecode.features.master).toBe(true);
     expect(firecode.features.review).toBe(false);
+    expect(firecode.openai).toEqual({
+      nativeCompaction: true,
+      providers: {
+        "openai-codex": { textVerbosity: "low", priority: true },
+        xai: { priority: true },
+      },
+    });
     expect(JSON.stringify(firecode)).not.toContain("anthropic/");
     expect(existsSync(join(f.managed, "pi-package", "firecode", "config.jsonc"))).toBe(false);
     expect(existsSync(join(f.managed, "pi-package", "firecode", "config.example.jsonc"))).toBe(true);

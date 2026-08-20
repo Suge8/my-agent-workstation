@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, test } from "bun:test";
 import { cleanupFirecodeModules, FIRECODE_DIR, loadFirecodeModule } from "./loader.ts";
@@ -35,6 +35,29 @@ test("missing runtime config disables optional behavior and warns on each sessio
 		"FireCode 配置：config.jsonc 不存在，已关闭可选功能",
 		"FireCode 配置：config.jsonc 不存在，已关闭可选功能",
 	]);
+});
+
+test("unreadable or malformed runtime config disables every optional feature", async () => {
+	const assertDisabled = (loaded: { config: { features: Record<string, boolean> }; problems: string[] }, features: string[]) =>
+		expect(loaded.config.features, loaded.problems.join("\n"))
+			.toEqual(Object.fromEntries(features.map((feature) => [feature, false])));
+
+	for (const configJsonc of ["{", "[]"]) {
+		const malformed = await loadFirecodeModule("config.ts", { configJsonc });
+		assertDisabled(
+			(malformed.loadConfig as () => { config: { features: Record<string, boolean> }; problems: string[] })(),
+			malformed.FEATURES as string[],
+		);
+	}
+
+	const unreadable = await loadFirecodeModule("config.ts");
+	const configPath = unreadable.CONFIG_PATH as string;
+	await rm(configPath);
+	await mkdir(configPath);
+	assertDisabled(
+		(unreadable.loadConfig as () => { config: { features: Record<string, boolean> }; problems: string[] })(),
+		unreadable.FEATURES as string[],
+	);
 });
 
 test("runtime config enables only its declared behavior", async () => {
