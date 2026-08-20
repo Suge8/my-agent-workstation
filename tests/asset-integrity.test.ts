@@ -69,7 +69,8 @@ const SECRET_PATTERNS = [
 	/sk-[A-Za-z0-9]{8,}/,
 	/gh[pousr]_[A-Za-z0-9]{20,}/,
 	/xox[baprs]-[A-Za-z0-9-]{12,}/,
-	/(?:api[_-]?key|access[_-]?token|secret[_-]?key|password)\s*[:=]\s*["']?[A-Za-z0-9+/=_-]{16,}/i,
+	/\b[A-Z][A-Z0-9_]*(?:API_KEY|ACCESS_TOKEN|SECRET_KEY|PASSWORD)\s*=\s*(?:"[A-Za-z0-9+/=_-]{16,}"|'[A-Za-z0-9+/=_-]{16,}'|[A-Za-z0-9+/=_-]{16,}(?=\s|$))/,
+	/\b(?:api[_-]?key|access[_-]?token|secret[_-]?key|password)\s*[:=]\s*(?:"[A-Za-z0-9+/=_-]{16,}"|'[A-Za-z0-9+/=_-]{16,}')/i,
 ];
 
 const assetRoots = [FIRECODE, PI_CONFIG, SKILLS];

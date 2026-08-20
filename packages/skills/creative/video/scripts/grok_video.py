@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 
 SESSIONS_DIR = Path.home() / ".grok" / "sessions"
-# Grok scans <SKILL_ROOT> as a skill root, so the inner grok can see this very
+# Grok scans ~/.agents as a skill root, so the inner grok can see this very
 # skill and re-run this script forever. The env guard breaks that recursion.
 GUARD_ENV = "VIDEO_GEN_SKILL_ACTIVE"
 INNER_RULES = (

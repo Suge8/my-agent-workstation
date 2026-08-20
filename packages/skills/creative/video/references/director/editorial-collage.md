@@ -1,7 +1,7 @@
 # 编辑拼贴路线（Vox 式）
 
 人物、历史、文化、情绪类主题的默认视觉系统。素材由 gpt-image 生成，动效全部由 Remotion
-驱动（`<VIDEO_PROJECT>/src/editorial/` 组件集）——不经过 AI 视频模型，
+驱动（当前视频项目 `src/editorial/` 组件集）——不经过 AI 视频模型，
 文字永远清晰、可重渲染、成本趋近于零。个别镜头需要有机微动（人物做动作、动物动）时，
 才按 `references/model-generation.md` 单独用 Seedance `--first-frame` 补那一镜。
 

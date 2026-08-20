@@ -13,7 +13,7 @@ Remotion 的领域知识入口。按任务只加载对应参考，不要一次�
 
 若还没有 Remotion 项目，加载 [创建 Remotion 项目](references/remotion/remotion-create/guide.md)。
 
-本机内容工作台默认：`<VIDEO_PROJECT>`（已有项目则直接在其中改，勿重复脚手架）。
+内容工作台使用当前视频项目根目录（已有项目则直接在其中改，勿重复脚手架）。
 
 ## React 标记
 

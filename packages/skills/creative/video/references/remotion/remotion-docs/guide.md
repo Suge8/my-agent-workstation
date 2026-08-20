@@ -7,24 +7,7 @@
 
 ## 搜索文档
 
-使用 Algolia 搜索 API 查找相关文档页面：
-
-```
-POST https://<ALGOLIA_APP_ID>-dsn.algolia.net/1/indexes/*/queries?x-algolia-api-key=<ALGOLIA_API_KEY>&x-algolia-application-id=<ALGOLIA_APP_ID>
-Content-Type: application/x-www-form-urlencoded
-
-{
-  "requests": [
-    {
-      "query": "<your search query>",
-      "indexName": "remotion",
-      "params": "attributesToRetrieve=[\"hierarchy.lvl0\",\"hierarchy.lvl1\",\"hierarchy.lvl2\",\"url\"]&hitsPerPage=10"
-    }
-  ]
-}
-```
-
-每个命中都包含一个指向文档页面的 `url` 字段。
+用现有搜索工具限定 `site:remotion.dev/docs` 查找相关页面，优先选择当前版本的官方文档结果。
 
 ## 以 Markdown 形式获取页面
 

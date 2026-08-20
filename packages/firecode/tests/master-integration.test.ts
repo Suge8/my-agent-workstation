@@ -653,7 +653,7 @@ test("subagents 工具行：中文动词 + 目标 + 关键参数，session 恢�
 	expect(line({ action: "hold", worker: "t1" })).toContain("待命 t1");
 	expect(line({ action: "stop", worker: "t2", forget: true })).toContain("移除 t2");
 	// session 恢复：整条绝对路径只显文件名，行尾截断不吃真信息。
-	expect(line({ action: "start", session: "<HOME>/sessions/2026-08-16T01_abc.jsonl", prompt: "继续" }))
+	expect(line({ action: "start", session: "/tmp/sessions/2026-08-16T01_abc.jsonl", prompt: "继续" }))
 		.toContain("启动 2026-08-16T01_abc.jsonl");
 });
 

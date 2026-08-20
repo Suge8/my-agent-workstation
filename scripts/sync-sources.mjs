@@ -18,7 +18,8 @@ const SECRETS = [
 	/xox[baprs]-[A-Za-z0-9-]{12,}/,
 	/AKIA[0-9A-Z]{16}/,
 	/AIza[0-9A-Za-z_-]{35}/,
-	/(?:[A-Z][A-Z0-9_]*(?:API_KEY|ACCESS_TOKEN|SECRET_KEY|PASSWORD)|apiKey|accessToken|secretKey|password)\s*[:=]\s*["']?[A-Za-z0-9+/=_-]{16,}/,
+	/\b[A-Z][A-Z0-9_]*(?:API_KEY|ACCESS_TOKEN|SECRET_KEY|PASSWORD)\s*=\s*(?:"[A-Za-z0-9+/=_-]{16,}"|'[A-Za-z0-9+/=_-]{16,}'|[A-Za-z0-9+/=_-]{16,}(?=\s|$))/,
+	/\b(?:[A-Z][A-Z0-9_]*(?:API_KEY|ACCESS_TOKEN|SECRET_KEY|PASSWORD)|apiKey|accessToken|secretKey|password)\s*[:=]\s*(?:"[A-Za-z0-9+/=_-]{16,}"|'[A-Za-z0-9+/=_-]{16,}')/,
 	/https:\/\/api\.day\.app\/(?!<key>)[A-Za-z0-9_-]{8,}\//,
 ];
 
