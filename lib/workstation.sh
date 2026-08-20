@@ -7,6 +7,8 @@ XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-"$HOME/.config"}
 PACKAGE_HOME="$STATE_HOME/pi-package"
 RUNTIME_HOME="$STATE_HOME/runtime"
 BACKUP_HOME="$STATE_HOME/backups"
+INTEGRITY_HOME="$STATE_HOME/integrity"
+OWNERSHIP_HOME="$STATE_HOME/ownership"
 MANAGED_MARKER='# >>> my-agent-workstation >>>'
 MANAGED_END='# <<< my-agent-workstation <<<'
 MODE=${MODE:-core}
@@ -53,9 +55,13 @@ workstation_mode_defaults() {
   esac
 }
 
+shell_hook_body() {
+  printf 'source %q' "$STATE_HOME/config/init.zsh"
+}
+
 workstation_detect() {
   PACKAGE_STATUS=missing
-  test -f "$PACKAGE_HOME/package.json" && test -f "$PACKAGE_HOME/firecode/index.ts" && PACKAGE_STATUS=normal
+  test -f "$PACKAGE_HOME/package.json" && check_integrity package && PACKAGE_STATUS=normal
   SYSTEM_STATUS=missing
   system_reference="$ROOT/packages/pi-config/SYSTEM.md"
   test ! -f "$STATE_HOME/system-installed.md" || system_reference="$STATE_HOME/system-installed.md"
@@ -66,8 +72,9 @@ workstation_detect() {
   if brew list --cask ghostty >/dev/null 2>&1 && brew list --cask font-maple-mono-nf >/dev/null 2>&1 &&
      brew list --versions starship >/dev/null 2>&1 && brew list --versions fastfetch >/dev/null 2>&1 &&
      brew list --versions zsh-autosuggestions >/dev/null 2>&1 && brew list --versions zsh-syntax-highlighting >/dev/null 2>&1 &&
-     test -f "$XDG_CONFIG_HOME/ghostty/config" && grep -Fq "$MANAGED_MARKER" "$XDG_CONFIG_HOME/ghostty/config" &&
-     test -f "$HOME/.zshrc" && grep -Fq "$MANAGED_MARKER" "$HOME/.zshrc"; then TERMINAL_STATUS=normal; fi
+     check_integrity terminal &&
+     managed_block_is "$XDG_CONFIG_HOME/ghostty/config" "config-file = \"$STATE_HOME/config/ghostty.conf\"" &&
+     managed_block_is "$HOME/.zshrc" "$(shell_hook_body)"; then TERMINAL_STATUS=normal; fi
   HELIUM_STATUS=missing
   brew list --cask helium-browser >/dev/null 2>&1 && HELIUM_STATUS=normal
   SEARCH_STATUS=missing
@@ -92,7 +99,9 @@ workstation_append_plan() {
   if test "$PACKAGE_STATUS" != normal || test "$FORCE_UPDATE" -eq 1; then ACTIONS+=(install_workstation_package); fi
   ACTIONS+=(configure_pi)
   if test "$REPLACE_SYSTEM" -eq 1; then ACTIONS+=(replace_system); fi
-  if test "$WITH_BCU" -eq 1 && { ! bcu --help >/dev/null 2>&1 || test "$FORCE_UPDATE" -eq 1; }; then ACTIONS+=(install_bcu); fi
+  if test "$WITH_BCU" -eq 1; then
+    if ! bcu --help >/dev/null 2>&1 || { test "$FORCE_UPDATE" -eq 1 && owns_component bcu; }; then ACTIONS+=(install_bcu); fi
+  fi
   if test "$WITH_BROWSER" -eq 1 && { test "$BROWSER_STATUS" != normal || test "$FORCE_UPDATE" -eq 1; }; then ACTIONS+=(install_browser); fi
   if test "$WITH_TERMINAL" -eq 1 && { test "$TERMINAL_STATUS" != normal || test "$FORCE_UPDATE" -eq 1; }; then ACTIONS+=(install_terminal); fi
   if test "$WITH_HELIUM" -eq 1 && { test "$HELIUM_STATUS" != normal || test "$FORCE_UPDATE" -eq 1; }; then ACTIONS+=(install_helium); fi
@@ -104,6 +113,86 @@ backup_once() {
   mkdir -p "$BACKUP_HOME"
   if test -e "$BACKUP_HOME/$name" || test -e "$BACKUP_HOME/$name.absent"; then return; fi
   if test -e "$target"; then cp -p "$target" "$BACKUP_HOME/$name"; else : > "$BACKUP_HOME/$name.absent"; fi
+}
+
+own_component() {
+  mkdir -p "$OWNERSHIP_HOME"
+  : > "$OWNERSHIP_HOME/$1"
+}
+
+owns_component() {
+  test -f "$OWNERSHIP_HOME/$1"
+}
+
+retire_backup() {
+  name=$1
+  mkdir -p "$BACKUP_HOME/history"
+  generation=$(date +%s).$$
+  test ! -e "$BACKUP_HOME/$name" || mv "$BACKUP_HOME/$name" "$BACKUP_HOME/history/$generation.$name" || return
+  test ! -e "$BACKUP_HOME/$name.absent" || mv "$BACKUP_HOME/$name.absent" "$BACKUP_HOME/history/$generation.$name.absent" || return
+}
+
+restore_owned_file() {
+  target=$1 name=$2 owner=$3
+  owns_component "$owner" || return 0
+  if test -f "$BACKUP_HOME/$name"; then
+    mkdir -p "$(dirname "$target")"
+    cp -p "$BACKUP_HOME/$name" "$target" || return
+  elif test -f "$BACKUP_HOME/$name.absent"; then
+    rm -f "$target" || return
+  fi
+  retire_backup "$name" || return
+  rm -f "$OWNERSHIP_HOME/$owner"
+}
+
+record_integrity() {
+  name=$1
+  shift
+  mkdir -p "$INTEGRITY_HOME"
+  temporary="$INTEGRITY_HOME/$name.sha256.tmp.$$"
+  : > "$temporary"
+  for file in "$@"; do
+    test -f "$file" || { rm -f "$temporary"; return 1; }
+    shasum -a 256 "$file" >> "$temporary" || { rm -f "$temporary"; return 1; }
+  done
+  mv "$temporary" "$INTEGRITY_HOME/$name.sha256"
+}
+
+check_integrity() {
+  name=$1
+  manifest="$INTEGRITY_HOME/$name.sha256"
+  test -f "$manifest" || return 1
+  shasum -a 256 -c "$manifest" >/dev/null 2>&1 || return 1
+  if test "$name" = package; then
+    expected=$(wc -l < "$manifest" | tr -d ' ')
+    actual=$(find "$PACKAGE_HOME" -type f | wc -l | tr -d ' ')
+    test "$actual" = "$expected" || return 1
+  fi
+}
+
+managed_block_is() {
+  target=$1 expected=$2
+  test -f "$target" || return 1
+  starts=$(grep -Fxc "$MANAGED_MARKER" "$target" 2>/dev/null || true)
+  ends=$(grep -Fxc "$MANAGED_END" "$target" 2>/dev/null || true)
+  test "$starts" = 1 && test "$ends" = 1 || return 1
+  actual=$(awk -v start="$MANAGED_MARKER" -v finish="$MANAGED_END" '
+    $0 == start { managed=1; next }
+    $0 == finish { managed=0; next }
+    managed { print }
+  ' "$target")
+  test "$actual" = "$expected"
+}
+
+record_package_integrity() {
+  mkdir -p "$INTEGRITY_HOME"
+  temporary="$INTEGRITY_HOME/package.sha256.tmp.$$"
+  find "$PACKAGE_HOME" -type f | LC_ALL=C sort | xargs shasum -a 256 > "$temporary" || {
+    rm -f "$temporary"
+    return 1
+  }
+  test -s "$temporary" || { rm -f "$temporary"; return 1; }
+  mv "$temporary" "$INTEGRITY_HOME/package.sha256"
 }
 
 install_workstation_package() {
@@ -159,6 +248,10 @@ available_models() {
 
 configure_pi() {
   mkdir -p "$PI_AGENT_HOME"
+  backup_once "$PI_AGENT_HOME/settings.json" pi-settings.json
+  backup_once "$PI_AGENT_HOME/keybindings.json" pi-keybindings.json
+  own_component pi-settings
+  own_component pi-keybindings
   providers=$(authenticated_providers)
   models=$(available_models)
   stored_selections="$STATE_HOME/model-selections.json"
@@ -177,7 +270,8 @@ configure_pi() {
     --pi-keybindings "$PI_AGENT_HOME/keybindings.json" \
     --firecode "$PACKAGE_HOME/firecode/config.jsonc"
   if test -n "$SELECTIONS"; then set -- "$@" --selections "$SELECTIONS"; fi
-  node "$ROOT/scripts/configure-workstation.mjs" "$@" >/dev/null
+  node "$ROOT/scripts/configure-workstation.mjs" "$@" >/dev/null || return
+  record_package_integrity || return
   if test -z "$providers" && test "$JSON" -eq 0; then
     printf '未检测到已认证模型；FireCode 模型能力保持关闭。请在 Pi 中运行 /login 后重试配置。\n' >&2
   fi
@@ -186,17 +280,32 @@ configure_pi() {
 replace_system() {
   mkdir -p "$PI_AGENT_HOME"
   backup_once "$PI_AGENT_HOME/SYSTEM.md" SYSTEM.md
+  own_component system
   cp "$ROOT/packages/pi-config/SYSTEM.md" "$PI_AGENT_HOME/SYSTEM.md"
   cp "$ROOT/packages/pi-config/SYSTEM.md" "$STATE_HOME/system-installed.md"
   chmod 600 "$PI_AGENT_HOME/SYSTEM.md" "$STATE_HOME/system-installed.md"
-  : > "$STATE_HOME/system-owned"
 }
 
 install_bcu() {
-  package="$ROOT/packages/better-computer-use"
-  npm install --prefix "$package" --ignore-scripts --no-audit --no-fund >/dev/null
-  npm run --prefix "$package" build >/dev/null
-  npm install --global "$package" >/dev/null
+  archive_dir=$(mktemp -d "${TMPDIR:-/tmp}/myaw-bcu.XXXXXX") || return
+  package="$archive_dir/package"
+  mkdir -p "$package"
+  cp -R "$ROOT/packages/better-computer-use/." "$package" || { rm -rf "$archive_dir"; return 1; }
+  npm install --prefix "$package" --ignore-scripts --no-audit --no-fund >/dev/null || { rm -rf "$archive_dir"; return 1; }
+  npm run --prefix "$package" build >/dev/null || { rm -rf "$archive_dir"; return 1; }
+  (cd "$package" && npm pack --pack-destination "$archive_dir" --ignore-scripts >/dev/null) || { rm -rf "$archive_dir"; return 1; }
+  tarball=$(find "$archive_dir" -type f -name '*.tgz' -print -quit)
+  test -n "$tarball" || { rm -rf "$archive_dir"; return 1; }
+  npm install --global --ignore-scripts "$tarball" >/dev/null || { rm -rf "$archive_dir"; return 1; }
+  global_root=$(npm root --global) || { npm uninstall --global better-computer-use >/dev/null 2>&1; rm -rf "$archive_dir"; return 1; }
+  if ! node "$global_root/better-computer-use/scripts/setup-helper.mjs" --runtime >/dev/null; then
+    npm uninstall --global better-computer-use >/dev/null 2>&1
+    rm -rf "$archive_dir"
+    return 1
+  fi
+  rm -rf "$archive_dir"
+  own_component bcu
+  bcu doctor --json >/dev/null 2>&1 || true
 }
 
 rebuild_shell_init() {
@@ -209,8 +318,7 @@ rebuild_shell_init() {
 }
 
 ensure_shell_hook() {
-  zsh_init=$(printf '%q' "$STATE_HOME/config/init.zsh")
-  append_managed_block "$HOME/.zshrc" "source $zsh_init" zshrc
+  append_managed_block "$HOME/.zshrc" "$(shell_hook_body)" zshrc
 }
 
 install_browser() {
@@ -221,16 +329,24 @@ install_browser() {
   test -n "$browser_path" || { printf 'CloakBrowser 未返回可执行文件路径。\n' >&2; return 1; }
   mkdir -p "$STATE_HOME/config/shell.d"
   printf 'export AGENT_BROWSER_EXECUTABLE_PATH=%q\nexport AGENT_BROWSER_NAMESPACE=my-agent-workstation\n' "$browser_path" > "$STATE_HOME/config/shell.d/browser.zsh"
+  record_integrity browser "$STATE_HOME/config/shell.d/browser.zsh" || return
   rebuild_shell_init
   ensure_shell_hook
 }
 
 append_managed_block() {
   target=$1 body=$2 backup=$3
+  owner="fragment-$backup"
   mkdir -p "$(dirname "$target")"
   touch "$target"
-  if grep -Fq "$MANAGED_MARKER" "$target"; then return; fi
-  backup_once "$target" "$backup"
+  if grep -Fq "$MANAGED_MARKER" "$target"; then
+    owns_component "$owner" || { printf '已有非本安装拥有的管理块: %s\n' "$target" >&2; return 1; }
+    managed_block_is "$target" "$body" && return 0
+    remove_managed_block "$target" || return
+  else
+    backup_once "$target" "$backup"
+    own_component "$owner"
+  fi
   {
     printf '\n%s\n' "$MANAGED_MARKER"
     printf '%s\n' "$body"
@@ -260,6 +376,13 @@ install_terminal() {
     printf '  source %q\n' "$STATE_HOME/config/zsh-plugins.zsh"
     printf 'fi\n'
   } > "$STATE_HOME/config/shell.d/terminal.zsh"
+  record_integrity terminal \
+    "$STATE_HOME/config/ghostty.conf" \
+    "$STATE_HOME/config/starship.toml" \
+    "$STATE_HOME/config/fastfetch/logo.txt" \
+    "$STATE_HOME/config/fastfetch/config.jsonc" \
+    "$STATE_HOME/config/zsh-plugins.zsh" \
+    "$STATE_HOME/config/shell.d/terminal.zsh" || return
   rebuild_shell_init
   append_managed_block "$XDG_CONFIG_HOME/ghostty/config" "config-file = \"$STATE_HOME/config/ghostty.conf\"" ghostty.config
   ensure_shell_hook
@@ -312,23 +435,37 @@ remove_managed_block() {
 
 workstation_uninstall() {
   mkdir -p "$STATE_HOME"
-  if test -d "$PACKAGE_HOME"; then pi remove "$PACKAGE_HOME" >/dev/null 2>&1 || true; fi
-  herdr integration uninstall pi >/dev/null 2>&1 || true
+  if test -d "$PACKAGE_HOME"; then
+    pi remove "$PACKAGE_HOME" >/dev/null 2>&1 || return
+    rm -rf "$PACKAGE_HOME" || return
+  fi
+  if owns_component integration; then
+    herdr integration uninstall pi >/dev/null 2>&1 || return
+    rm -f "$OWNERSHIP_HOME/integration"
+  fi
   label=dev.myagentworkstation.herdr
   plist="$HOME/Library/LaunchAgents/$label.plist"
-  launchctl bootout "gui/$(id -u)/$label" >/dev/null 2>&1 || true
-  if test -f "$BACKUP_HOME/herdr.plist"; then cp "$BACKUP_HOME/herdr.plist" "$plist"; else rm -f "$plist"; fi
-  remove_managed_block "$XDG_CONFIG_HOME/ghostty/config"
-  remove_managed_block "$HOME/.zshrc"
-  if test -f "$BACKUP_HOME/SYSTEM.md"; then
-    cp "$PI_AGENT_HOME/SYSTEM.md" "$BACKUP_HOME/SYSTEM.before-uninstall" 2>/dev/null || true
-    cp "$BACKUP_HOME/SYSTEM.md" "$PI_AGENT_HOME/SYSTEM.md"
-  elif test -f "$BACKUP_HOME/SYSTEM.md.absent"; then
-    rm -f "$PI_AGENT_HOME/SYSTEM.md"
+  if owns_component herdr-service; then
+    launchctl bootout "gui/$(id -u)/$label" >/dev/null 2>&1 || true
+    restore_owned_file "$plist" herdr.plist herdr-service
   fi
-  if test -f "$STATE_HOME/bark-owned"; then rm -f "$PI_AGENT_HOME/bark-key"; fi
-  npm uninstall --global better-computer-use >/dev/null 2>&1 || true
-  rm -rf "$PACKAGE_HOME" "$STATE_HOME/config" "$RUNTIME_HOME" "$STATE_HOME/bark-owned" "$STATE_HOME/system-owned" "$STATE_HOME/system-installed.md" "$STATE_HOME/herdr-official"
+  if owns_component fragment-ghostty.config; then
+    remove_managed_block "$XDG_CONFIG_HOME/ghostty/config" || return
+    retire_backup ghostty.config || return
+  fi
+  if owns_component fragment-zshrc; then
+    remove_managed_block "$HOME/.zshrc" || return
+    retire_backup zshrc || return
+  fi
+  restore_owned_file "$PI_AGENT_HOME/SYSTEM.md" SYSTEM.md system || return
+  restore_owned_file "$PI_AGENT_HOME/settings.json" pi-settings.json pi-settings || return
+  restore_owned_file "$PI_AGENT_HOME/keybindings.json" pi-keybindings.json pi-keybindings || return
+  restore_owned_file "$PI_AGENT_HOME/bark-key" bark-key bark || return
+  if owns_component bcu; then
+    npm uninstall --global better-computer-use >/dev/null 2>&1 || return
+    rm -f "$OWNERSHIP_HOME/bcu"
+  fi
+  rm -rf "$PACKAGE_HOME" "$STATE_HOME/config" "$RUNTIME_HOME" "$INTEGRITY_HOME" "$OWNERSHIP_HOME" "$STATE_HOME/system-installed.md" "$STATE_HOME/herdr-official"
   printf '{"schema":1,"status":"uninstalled","backups":"%s"}\n' "$BACKUP_HOME" > "$STATE_HOME/state.json"
 }
 
@@ -372,7 +509,8 @@ workstation_configure_search() {
   if test -n "$bark"; then
     case "$bark" in https://api.day.app/*/) ;; *) printf 'Bark 地址格式无效。\n' >&2; unset bark; return 1 ;; esac
     mkdir -p "$PI_AGENT_HOME"
-    if test ! -f "$PI_AGENT_HOME/bark-key"; then : > "$STATE_HOME/bark-owned"; fi
+    backup_once "$PI_AGENT_HOME/bark-key" bark-key
+    own_component bark
     printf '%s\n' "$bark" > "$PI_AGENT_HOME/bark-key"
     chmod 600 "$PI_AGENT_HOME/bark-key"
   fi

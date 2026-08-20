@@ -48,7 +48,11 @@ case "$name" in
       "install --global --ignore-scripts @earendil-works/pi-coding-agent@latest") log "$@"; touch "$state/pi_npm"; value pi_latest > "$state/pi_version" ;;
       "install --global cloakbrowser") log "$@"; touch "$state/cloakbrowser" ;;
       install\\ --prefix*|run\\ --prefix*) log "$@" ;;
-      install\\ --global*) log "$@"; touch "$state/bcu" ;;
+      pack\\ --pack-destination\\ *\\ --ignore-scripts)
+        log "$@"; destination=\${3}; mkdir -p "$destination"; touch "$destination/better-computer-use-0.1.0.tgz"
+        ;;
+      "root --global") printf '%s\\n' "$state/npm-root" ;;
+      install\\ --global\\ --ignore-scripts\\ *.tgz) log "$@"; touch "$state/bcu" ;;
       "uninstall --global better-computer-use") log "$@"; rm -f "$state/bcu" ;;
       *) exit 1 ;;
     esac
@@ -107,7 +111,15 @@ case "$name" in
     has bcu || exit 127
     case "$*" in
       "--help") exit 0 ;;
-      "status --json") printf '{"ok":true,"result":{"running":false}}\\n' ;;
+      "status --json") printf '{"ok":true,"result":{"running":true}}\\n' ;;
+      "doctor --json")
+        if has bcu_permissions_missing; then
+          printf '{"ok":true,"result":{"broker":{"pid":42},"helper":{"protocolVersion":1},"permissions":{"accessibility":false,"screenRecording":false}}}\\n'
+        else
+          printf '{"ok":true,"result":{"broker":{"pid":42},"helper":{"protocolVersion":1},"permissions":{"accessibility":true,"screenRecording":true}}}\\n'
+        fi
+        ;;
+      setup) rm -f "$state/bcu_permissions_missing" ;;
       *) exit 1 ;;
     esac
     ;;
@@ -152,6 +164,9 @@ esac
   chmodSync(dispatcher, 0o755);
   for (const name of ["uname", "sw_vers", "zsh", "node", "npm", "brew", "pi", "herdr", "bcu", "agent-browser", "cloakbrowser", "launchctl", "security", "curl"])
     symlinkSync("fake-command", join(bin, name));
+  const npmRoot = join(fakeState, "npm-root", "better-computer-use", "scripts");
+  mkdirSync(npmRoot, { recursive: true });
+  writeFileSync(join(npmRoot, "setup-helper.mjs"), `import { writeFileSync } from "node:fs"; writeFileSync(process.env.FAKE_STATE + "/bcu-helper", "");\n`);
   const localBin = join(home, ".local", "bin");
   if ("herdr" in state) {
     mkdirSync(localBin, { recursive: true });
@@ -235,21 +250,29 @@ describe("setup public CLI", () => {
     expect(after.split("pi install ").length).toBe(before.split("pi install ").length);
   });
 
-  test("SYSTEM replacement is backed up and uninstall restores it", () => {
+  test("managed Pi files are backed up, restored, and start a fresh backup cycle", () => {
     const f = fixture(ready());
     const agent = join(f.home, ".pi", "agent");
     mkdirSync(agent, { recursive: true });
-    writeFileSync(join(agent, "SYSTEM.md"), "original\n");
-    const installed = apply(f, "core", ["--replace-system"]);
-    expect(installed.status).toBe(0, installed.stderr);
-    expect(readFileSync(join(f.managed, "backups", "SYSTEM.md"), "utf8")).toBe("original\n");
-    const removed = f.run(["uninstall", "--yes", "--json"]);
-    expect(removed.status).toBe(0, removed.stderr);
-    expect(readFileSync(join(agent, "SYSTEM.md"), "utf8")).toBe("original\n");
-    expect(existsSync(join(f.managed, "pi-package"))).toBe(false);
+    writeFileSync(join(agent, "SYSTEM.md"), "original system\n");
+    writeFileSync(join(agent, "settings.json"), '{"custom":"settings"}\n');
+    writeFileSync(join(agent, "keybindings.json"), '{"custom":"keys"}\n');
+    writeFileSync(join(agent, "bark-key"), "original bark\n");
+    expect(apply(f, "core", ["--replace-system"]).status).toBe(0);
+    expect(f.run(["configure-search"], "\n\nhttps://api.day.app/new/\n").status).toBe(0);
+    expect(f.run(["uninstall", "--yes", "--json"]).status).toBe(0);
+    expect(readFileSync(join(agent, "SYSTEM.md"), "utf8")).toBe("original system\n");
+    expect(readFileSync(join(agent, "settings.json"), "utf8")).toBe('{"custom":"settings"}\n');
+    expect(readFileSync(join(agent, "keybindings.json"), "utf8")).toBe('{"custom":"keys"}\n');
+    expect(readFileSync(join(agent, "bark-key"), "utf8")).toBe("original bark\n");
+    writeFileSync(join(agent, "SYSTEM.md"), "second system\n");
+    expect(apply(f, "core", ["--replace-system"]).status).toBe(0);
+    expect(f.run(["uninstall", "--yes", "--json"]).status).toBe(0);
+    expect(readFileSync(join(agent, "SYSTEM.md"), "utf8")).toBe("second system\n");
+    expect(existsSync(join(f.managed, "backups", "history"))).toBe(true);
   });
 
-  test("full mode installs automation and terminal fragments without duplicating markers", () => {
+  test("full mode installs an independent BCU package and terminal fragments without duplicating markers", () => {
     const f = fixture(ready());
     const first = apply(f, "full");
     expect(first.status).toBe(0, first.stderr);
@@ -258,11 +281,34 @@ describe("setup public CLI", () => {
     expect(readFileSync(ghostty, "utf8")).toContain("my-agent-workstation");
     expect(readFileSync(zshrc, "utf8")).toContain("my-agent-workstation");
     expect(existsSync(join(f.fakeState, "bcu"))).toBe(true);
+    expect(existsSync(join(f.fakeState, "bcu-helper"))).toBe(true);
+    const commands = readFileSync(f.log, "utf8");
+    expect(commands).toContain("npm pack --pack-destination");
+    expect(commands).toMatch(/npm install --global --ignore-scripts .*better-computer-use-0\.1\.0\.tgz/);
     expect(existsSync(join(f.fakeState, "agent-browser"))).toBe(true);
     expect(existsSync(join(f.fakeState, "cloakbrowser"))).toBe(true);
     expect(apply(f, "full").status).toBe(0);
     expect(readFileSync(ghostty, "utf8").match(/>>> my-agent-workstation/g)).toHaveLength(1);
     expect(readFileSync(zshrc, "utf8").match(/>>> my-agent-workstation/g)).toHaveLength(1);
+  });
+
+  test("npm tarball installs remain usable after their source directory is removed", () => {
+    const root = mkdtempSync(join(tmpdir(), "myaw-npm-pack-"));
+    roots.push(root);
+    const source = join(root, "source");
+    const archive = join(root, "archive");
+    const prefix = join(root, "prefix");
+    mkdirSync(source); mkdirSync(archive); mkdirSync(join(source, "bin"));
+    writeFileSync(join(source, "package.json"), JSON.stringify({ name: "myaw-pack-probe", version: "1.0.0", bin: { "myaw-pack-probe": "bin/probe.mjs" } }));
+    writeFileSync(join(source, "bin", "probe.mjs"), "#!/usr/bin/env node\nconsole.log('durable')\n");
+    chmodSync(join(source, "bin", "probe.mjs"), 0o755);
+    expect(spawnSync("npm", ["pack", "--pack-destination", archive, "--ignore-scripts"], { cwd: source }).status).toBe(0);
+    const tarball = join(archive, "myaw-pack-probe-1.0.0.tgz");
+    expect(spawnSync("npm", ["install", "--global", "--prefix", prefix, "--ignore-scripts", tarball]).status).toBe(0);
+    rmSync(source, { recursive: true });
+    const probe = spawnSync(join(prefix, "bin", "myaw-pack-probe"), { encoding: "utf8" });
+    expect(probe.status).toBe(0);
+    expect(probe.stdout).toBe("durable\n");
   });
 
   test("authenticated providers generate only available model configuration", () => {
@@ -290,19 +336,64 @@ describe("setup public CLI", () => {
     expect(readFileSync(join(f.managed, "config", "shell.d", "browser.zsh"), "utf8")).toContain("AGENT_BROWSER_EXECUTABLE_PATH");
   });
 
-  test("repair restores missing managed assets and update refreshes stable dependencies", () => {
+  test("repair restores missing and locally corrupted managed assets", () => {
     const f = fixture(ready());
-    expect(apply(f).status).toBe(0);
-    rmSync(join(f.managed, "pi-package"), { recursive: true });
+    expect(apply(f, "full").status).toBe(0);
+    const skill = join(f.managed, "pi-package", "skills", "operations", "workstation-setup", "SKILL.md");
+    const terminal = join(f.managed, "config", "ghostty.conf");
+    const orphan = join(f.managed, "pi-package", "orphan.txt");
+    const zshrc = join(f.home, ".zshrc");
+    writeFileSync(skill, "corrupt\n");
+    writeFileSync(terminal, "corrupt\n");
+    writeFileSync(orphan, "orphan\n");
+    writeFileSync(zshrc, readFileSync(zshrc, "utf8").replace(/source .*init\.zsh/, "corrupt managed body"));
     const repaired = f.run(["repair", "--yes", "--json"]);
     expect(repaired.status).toBe(0, repaired.stderr);
-    expect(existsSync(join(f.managed, "pi-package", "package.json"))).toBe(true);
+    expect(readFileSync(skill, "utf8")).not.toBe("corrupt\n");
+    expect(readFileSync(terminal, "utf8")).not.toBe("corrupt\n");
+    expect(existsSync(orphan)).toBe(false);
+    expect(readFileSync(zshrc, "utf8")).toContain("source ");
+  });
+
+  test("update refreshes stable dependencies", () => {
+    const f = fixture(ready());
+    expect(apply(f).status).toBe(0);
     writeFileSync(join(f.fakeState, "herdr_latest"), "2.0.0");
     const updated = f.run(["update", "--yes", "--json"]);
     expect(updated.status).toBe(0, updated.stderr);
     const log = readFileSync(f.log, "utf8");
     expect(log).toContain("npm install --global --ignore-scripts @earendil-works/pi-coding-agent@latest");
     expect(log).toContain("curl -fsSL https://herdr.dev/install.sh -o");
+  });
+
+  test("pre-existing BCU and Herdr integration remain external on uninstall", () => {
+    const f = fixture(ready({ bcu: "" }));
+    expect(apply(f, "full").status).toBe(0);
+    expect(f.run(["uninstall", "--yes", "--json"]).status).toBe(0);
+    expect(existsSync(join(f.fakeState, "bcu"))).toBe(true);
+    expect(existsSync(join(f.fakeState, "integration"))).toBe(true);
+    const commands = readFileSync(f.log, "utf8");
+    expect(commands).not.toContain("integration uninstall pi");
+    expect(commands).not.toContain("uninstall --global better-computer-use");
+  });
+
+  test("an existing lookalike managed block is never claimed or removed", () => {
+    const f = fixture(ready());
+    const zshrc = join(f.home, ".zshrc");
+    const existing = "user config\n# >>> my-agent-workstation >>>\nexternal body\n# <<< my-agent-workstation <<<\n";
+    writeFileSync(zshrc, existing);
+    expect(apply(f).status).toBe(0);
+    expect(f.run(["uninstall", "--yes", "--json"]).status).toBe(0);
+    expect(readFileSync(zshrc, "utf8")).toBe(existing);
+  });
+
+  test("full mode refuses ready state until BCU permissions are usable", () => {
+    const f = fixture(ready({ bcu_permissions_missing: "" }));
+    const result = apply(f, "full");
+    expect(result.status).toBe(1);
+    expect(JSON.parse(result.stdout).valid).toBe(false);
+    expect(result.stderr).toContain("configure-search");
+    expect(existsSync(join(f.managed, "state.json"))).toBe(false);
   });
 
   test("search setup keeps secrets out of output, logs, and shell config", () => {

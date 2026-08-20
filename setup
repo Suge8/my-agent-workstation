@@ -205,15 +205,14 @@ detect() {
   if command -v bcu >/dev/null 2>&1 && bcu --help >/dev/null 2>&1; then
     BCU_PERMISSION_STATUS=unknown
     bcu_status=$(bcu status --json 2>/dev/null || true)
-    case "$bcu_status" in
-      *'"running":true'*)
-        bcu_doctor=$(bcu doctor --json 2>/dev/null || true)
-        case "$bcu_doctor" in
-          *'"accessibility":true'*'"screenRecording":true'*) BCU_PERMISSION_STATUS=normal ;;
-          *) BCU_PERMISSION_STATUS=conflict ;;
-        esac
-        ;;
-    esac
+    if printf '%s' "$bcu_status" | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{try{const j=JSON.parse(s),r=j.result??j;process.exit(r.running===true?0:1)}catch{process.exit(1)}})' 2>/dev/null; then
+      bcu_doctor=$(bcu doctor --json 2>/dev/null || true)
+      if printf '%s' "$bcu_doctor" | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{try{const j=JSON.parse(s),r=j.result??j,p=r.permissions,h=r.helper,b=r.broker;process.exit(p?.accessibility===true&&p?.screenRecording===true&&Number.isInteger(h?.protocolVersion)&&Number.isInteger(b?.pid)?0:1)}catch{process.exit(1)}})' 2>/dev/null; then
+        BCU_PERMISSION_STATUS=normal
+      else
+        BCU_PERMISSION_STATUS=conflict
+      fi
+    fi
   fi
 
   agent_browser=missing
@@ -221,7 +220,11 @@ detect() {
   agent-browser --version >/dev/null 2>&1 && agent_browser=normal
   cloakbrowser info >/dev/null 2>&1 && cloak_browser=normal
   if test "$agent_browser" = normal && test "$cloak_browser" = normal; then
-    BROWSER_STATUS=normal
+    if test "$WITH_BROWSER" -eq 1 && { ! check_integrity browser || ! managed_block_is "$HOME/.zshrc" "$(shell_hook_body)"; }; then
+      BROWSER_STATUS=conflict
+    else
+      BROWSER_STATUS=normal
+    fi
   elif test "$agent_browser" = missing && test "$cloak_browser" = missing; then
     BROWSER_STATUS=missing
   else
@@ -341,6 +344,7 @@ start_herdr_login_service() {
   plist="$HOME/Library/LaunchAgents/$label.plist"
   mkdir -p "$(dirname "$plist")" "$STATE_HOME/logs"
   backup_once "$plist" herdr.plist
+  own_component herdr-service
   BINARY="$binary" HOME_VALUE="$HOME" STATE_VALUE="$STATE_HOME" PLIST="$plist" node - <<'NODE'
 const fs = require("node:fs");
 const escape = (value) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
@@ -371,7 +375,7 @@ run_action() {
     migrate_herdr_from_homebrew) brew services stop herdr >/dev/null 2>&1 || true; brew uninstall herdr >/dev/null ;;
     install_herdr|update_herdr) install_herdr_official ;;
     start_herdr_service) start_herdr_login_service ;;
-    install_pi_integration) herdr integration install pi >/dev/null ;;
+    install_pi_integration) herdr integration install pi >/dev/null && own_component integration ;;
     *) workstation_run_action "$1" ;;
   esac
 }
@@ -384,8 +388,8 @@ is_valid() {
   test "$SERVICE_STATUS" = normal || return 1
   test "$INTEGRATION_STATUS" = normal || return 1
   test "$PACKAGE_STATUS" = normal || return 1
-  if test -f "$STATE_HOME/system-owned"; then test "$SYSTEM_STATUS" = normal || return 1; fi
-  if test "$WITH_BCU" -eq 1; then bcu --help >/dev/null 2>&1 || return 1; fi
+  if owns_component system; then test "$SYSTEM_STATUS" = normal || return 1; fi
+  if test "$WITH_BCU" -eq 1; then test "$BCU_PERMISSION_STATUS" = normal || return 1; fi
   if test "$WITH_BROWSER" -eq 1; then test "$BROWSER_STATUS" = normal || return 1; fi
   if test "$WITH_TERMINAL" -eq 1; then test "$TERMINAL_STATUS" = normal || return 1; fi
   if test "$WITH_HELIUM" -eq 1; then test "$HELIUM_STATUS" = normal || return 1; fi
@@ -402,7 +406,11 @@ print_verify() {
   elif test "$valid" = true; then
     printf '验证通过：核心运行时与所选工作站组件均可用。\n'
   else
-    printf '验证失败，请运行 setup doctor 查看缺口。\n'
+    if test "$WITH_BCU" -eq 1 && test "$BCU_PERMISSION_STATUS" != normal; then
+      printf '验证失败：BCU 需要 macOS 辅助功能和屏幕录制权限。请运行 bcu setup 后重试 setup verify。\n'
+    else
+      printf '验证失败，请运行 setup doctor 查看缺口。\n'
+    fi
   fi
   test "$valid" = true
 }
@@ -531,7 +539,11 @@ main() {
     uninstall)
       if test "$YES" -ne 1; then ask_yes '卸载受管理配置并恢复原 SYSTEM？外部工具会保留。' || { printf '已取消。\n'; exit 1; }; fi
       acquire_workstation_lock || exit
-      workstation_uninstall
+      if ! workstation_uninstall; then
+        release_workstation_lock
+        printf '卸载未完成；所有权状态和备份已保留，请修复错误后重试。\n' >&2
+        exit 1
+      fi
       release_workstation_lock
       if test "$JSON" -eq 1; then printf '{"status":"uninstalled","backups":"%s"}\n' "$BACKUP_HOME"; else printf '已卸载受管理内容；备份保留在 %s。\n' "$BACKUP_HOME"; fi
       ;;
