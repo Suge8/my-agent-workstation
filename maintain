@@ -1,0 +1,18 @@
+#!/bin/bash
+set -eu
+
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+command=${1:-}
+case "$command" in
+  sync)
+    shift
+    node "$ROOT/scripts/sync-sources.mjs" "$@"
+    cd "$ROOT"
+    bun run test
+    bun run check:shell
+    ;;
+  *)
+    printf '%s\n' '用法: maintain sync [--firecode <路径>] [--skills <路径>] [--system <路径>]' >&2
+    exit 64
+    ;;
+esac

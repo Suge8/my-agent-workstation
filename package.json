@@ -10,6 +10,6 @@
   "scripts": {
     "test": "bun test tests packages/firecode/tests",
     "test:bcu": "npm --prefix packages/better-computer-use test",
-    "check:shell": "bash -n setup lib/workstation.sh && shellcheck setup lib/workstation.sh"
+    "check:shell": "bash -n maintain setup lib/workstation.sh install.sh && shellcheck maintain setup lib/workstation.sh install.sh"
   }
 }

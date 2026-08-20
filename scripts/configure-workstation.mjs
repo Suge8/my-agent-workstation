@@ -68,6 +68,8 @@ function restoreSettings(current, baseline, managed) {
 }
 
 export async function restore(options) {
+	const ownershipPath = resolve(options.ownership);
+	if (!existsSync(ownershipPath)) throw new Error("Pi 配置接管清单缺失；已保留 backups，请恢复清单或手动回退");
 	const settingsPath = resolve(options["pi-settings"]);
 	const keybindingsPath = resolve(options["pi-keybindings"]);
 	const settingsBackup = resolve(options["pi-settings-backup"]);
@@ -77,7 +79,7 @@ export async function restore(options) {
 		readObject(keybindingsPath),
 		readObject(settingsBackup),
 		readObject(keybindingsBackup),
-		readObject(resolve(options.ownership)),
+		readObject(ownershipPath),
 	]);
 	const restoredSettings = restoreSettings(settings, baselineSettings, ownership.settings ?? []);
 	const restoredKeybindings = restoreKeys(keybindings, baselineKeybindings, ownership.keybindings ?? []);

@@ -26,7 +26,7 @@ Maintainers can run `./setup` from a checkout. The wizard offers:
 
 - **Pi:** agent sessions, models, and package host.
 - **Herdr:** required workspace, tab, pane, and agent-state manager. The verified official installer tracks the latest stable release, while a managed LaunchAgent starts it at login.
-- **FireCode:** presets, status UI, adversarial review, and multi-agent control.
+- **FireCode:** presets, status UI, adversarial review, and multi-agent control. Public configuration is documented in the [FireCode guide](resources/firecode/README.md).
 - **Skills:** task-specific operating guidance, excluding archives, `search-skills`, evals, caches, and vendors.
 - **BCU:** standalone CLI, Broker, and native Helper for macOS app control. Attribution is documented in its [package README](packages/better-computer-use/README.md).
 - **agent-browser + CloakBrowser:** isolated web automation. Helium is only an optional daily browser.
@@ -48,7 +48,17 @@ The installed `workstation-setup` Skill delegates to the same control plane. Bra
 
 Provider readiness is checked with `pi auth check --no-refresh`. Only authenticated, available models are written to Pi and FireCode; unavailable roles are disabled rather than left broken. Follow the [model selection format](resources/models/README.md) and pass `--selections <json>` to replace recommended models; the choice is retained across updates alongside unrelated Pi settings and custom presets.
 
-Every managed replacement is backed up. Ghostty and Zsh receive removable marked fragments. SYSTEM is a full replacement and non-interactive runs must explicitly choose `--replace-system` or `--keep-system`. Migrating an existing Homebrew Herdr stops its panes, so it separately requires `--migrate-herdr`.
+Every managed replacement is backed up. Ghostty and Zsh receive removable marked fragments. First-time non-interactive setup must explicitly keep or replace SYSTEM. An untouched managed SYSTEM follows stable updates; a locally edited SYSTEM is left unchanged until the user explicitly keeps or replaces it. Migrating an existing Homebrew Herdr stops its panes, so it separately requires `--migrate-herdr`.
+
+Uninstall removes only content owned by this workstation. Package-manager tools such as agent-browser, CloakBrowser, Ghostty, Starship, Fastfetch, and Helium remain installed.
+
+## Maintain
+
+```bash
+./maintain sync
+```
+
+This copies FireCode, active Skills, and SYSTEM from their standard locations under `$HOME`, removes private paths and excluded material, then runs the project tests. Optional `--firecode`, `--skills`, and `--system` paths override the defaults. It never commits, tags, pushes, or publishes.
 
 ## Develop
 

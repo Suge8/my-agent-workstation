@@ -63,10 +63,14 @@ workstation_detect() {
   PACKAGE_STATUS=missing
   test -f "$PACKAGE_HOME/package.json" && check_integrity package && PACKAGE_STATUS=normal
   SYSTEM_STATUS=missing
-  system_reference="$ROOT/packages/pi-config/SYSTEM.md"
-  test ! -f "$STATE_HOME/system-installed.md" || system_reference="$STATE_HOME/system-installed.md"
   if test -f "$PI_AGENT_HOME/SYSTEM.md"; then
-    if cmp -s "$PI_AGENT_HOME/SYSTEM.md" "$system_reference"; then SYSTEM_STATUS=normal; else SYSTEM_STATUS=conflict; fi
+    if owns_component system; then
+      if cmp -s "$PI_AGENT_HOME/SYSTEM.md" "$STATE_HOME/system-installed.md"; then SYSTEM_STATUS=normal; else SYSTEM_STATUS=conflict; fi
+    elif cmp -s "$PI_AGENT_HOME/SYSTEM.md" "$ROOT/packages/pi-config/SYSTEM.md"; then
+      SYSTEM_STATUS=normal
+    else
+      SYSTEM_STATUS=unmanaged
+    fi
   fi
   TERMINAL_STATUS=missing
   if brew list --cask ghostty >/dev/null 2>&1 && brew list --cask font-maple-mono-nf >/dev/null 2>&1 &&
@@ -292,6 +296,29 @@ restore_pi_configuration() {
   rm -f "$OWNERSHIP_HOME/pi-settings" "$OWNERSHIP_HOME/pi-keybindings"
 }
 
+detach_system() {
+  owns_component system || return 0
+  retire_backup SYSTEM.md || return
+  rm -f "$OWNERSHIP_HOME/system" "$STATE_HOME/system-installed.md"
+}
+
+prepare_update_system() {
+  if test "$SYSTEM_CHOICE_EXPLICIT" -eq 1; then
+    if test "$KEEP_SYSTEM" -eq 1; then detach_system || return; fi
+    return 0
+  fi
+  if owns_component system; then
+    if cmp -s "$PI_AGENT_HOME/SYSTEM.md" "$STATE_HOME/system-installed.md"; then
+      REPLACE_SYSTEM=1
+    else
+      printf 'SYSTEM 已被修改；请用 --keep-system 保留它，或用 --replace-system 覆盖它。\n' >&2
+      return 3
+    fi
+  else
+    KEEP_SYSTEM=1
+  fi
+}
+
 replace_system() {
   mkdir -p "$PI_AGENT_HOME"
   backup_once "$PI_AGENT_HOME/SYSTEM.md" SYSTEM.md
@@ -473,7 +500,11 @@ workstation_uninstall() {
     remove_managed_block "$HOME/.zshrc" || return
     retire_backup zshrc || return
   fi
-  restore_owned_file "$PI_AGENT_HOME/SYSTEM.md" SYSTEM.md system || return
+  if owns_component system && test "$KEEP_SYSTEM" -eq 1; then
+    detach_system || return
+  else
+    restore_owned_file "$PI_AGENT_HOME/SYSTEM.md" SYSTEM.md system || return
+  fi
   restore_pi_configuration || return
   restore_owned_file "$PI_AGENT_HOME/bark-key" bark-key bark || return
   if owns_component bcu; then
@@ -500,9 +531,9 @@ workstation_update_release() {
   updated=$(find "$work" -mindepth 1 -maxdepth 1 -type d -name 'my-agent-workstation-*' -print -quit)
   test -x "$updated/setup" || { rm -rf "$work"; return 1; }
   if test "$JSON" -eq 1; then
-    MYAW_SKIP_SELF_UPDATE=1 "$updated/setup" update --yes --keep-system --json
+    MYAW_SKIP_SELF_UPDATE=1 "$updated/setup" update --yes --json
   else
-    MYAW_SKIP_SELF_UPDATE=1 "$updated/setup" update --yes --keep-system
+    MYAW_SKIP_SELF_UPDATE=1 "$updated/setup" update --yes
   fi
   result=$?
   rm -rf "$work"

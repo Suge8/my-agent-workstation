@@ -291,6 +291,36 @@ describe("setup public CLI", () => {
     expect(existsSync(join(f.managed, "backups", "history"))).toBe(true);
   });
 
+  test("missing Pi ownership metadata blocks uninstall without discarding recovery data", () => {
+    const f = fixture(ready({ "auth-openai-codex": "" }));
+    expect(apply(f).status).toBe(0);
+    rmSync(join(f.managed, "pi-managed.json"));
+    const result = f.run(["uninstall", "--yes", "--json"]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("接管清单");
+    expect(existsSync(join(f.managed, "backups", "pi-settings.json.absent"))).toBe(true);
+    expect(existsSync(join(f.managed, "ownership", "pi-settings"))).toBe(true);
+  });
+
+  test("managed SYSTEM updates only while untouched and detaches when kept", () => {
+    const f = fixture(ready());
+    expect(apply(f, "core", ["--replace-system"]).status).toBe(0);
+    const system = join(f.home, ".pi", "agent", "SYSTEM.md");
+    const installed = join(f.managed, "system-installed.md");
+    writeFileSync(system, "old managed system\n");
+    writeFileSync(installed, "old managed system\n");
+    expect(f.run(["update", "--yes", "--json"]).status).toBe(0);
+    expect(readFileSync(system, "utf8")).toBe(readFileSync(resolve(import.meta.dir, "../packages/pi-config/SYSTEM.md"), "utf8"));
+    writeFileSync(system, "user system\n");
+    const conflict = f.run(["update", "--yes", "--json"]);
+    expect(conflict.status).toBe(3);
+    expect(conflict.stderr).toContain("--keep-system");
+    expect(f.run(["update", "--yes", "--json", "--keep-system"]).status).toBe(0);
+    expect(existsSync(join(f.managed, "ownership", "system"))).toBe(false);
+    expect(f.run(["uninstall", "--yes", "--json"]).status).toBe(0);
+    expect(readFileSync(system, "utf8")).toBe("user system\n");
+  });
+
   test("full mode installs an independent BCU package and terminal fragments without duplicating markers", () => {
     const f = fixture(ready());
     const first = apply(f, "full");

@@ -10,6 +10,7 @@ YES=0
 MODE=core
 REPLACE_SYSTEM=0
 KEEP_SYSTEM=0
+SYSTEM_CHOICE_EXPLICIT=0
 WITH_BCU=0
 WITH_BROWSER=0
 WITH_TERMINAL=0
@@ -34,8 +35,8 @@ parse_options() {
       --json) JSON=1 ;;
       --yes) YES=1 ;;
       --mode) shift; MODE=${1:-} ;;
-      --replace-system) REPLACE_SYSTEM=1 ;;
-      --keep-system) KEEP_SYSTEM=1 ;;
+      --replace-system) REPLACE_SYSTEM=1; SYSTEM_CHOICE_EXPLICIT=1 ;;
+      --keep-system) KEEP_SYSTEM=1; SYSTEM_CHOICE_EXPLICIT=1 ;;
       --with-bcu) WITH_BCU=1 ;;
       --with-browser) WITH_BROWSER=1 ;;
       --with-terminal) WITH_TERMINAL=1 ;;
@@ -519,7 +520,7 @@ main() {
     update|repair|verify|uninstall) load_state_options || { printf '状态文件损坏。\n' >&2; exit 3; } ;;
   esac
   case "$command" in
-    update) FORCE_UPDATE=1; test "$REPLACE_SYSTEM" -eq 1 || KEEP_SYSTEM=1 ;;
+    update) FORCE_UPDATE=1; prepare_update_system || exit ;;
     repair) test "$REPLACE_SYSTEM" -eq 1 || KEEP_SYSTEM=1 ;;
   esac
   workstation_mode_defaults || exit
@@ -537,7 +538,14 @@ main() {
     verify) print_verify ;;
     apply|update|repair) apply_plan ;;
     uninstall)
-      if test "$YES" -ne 1; then ask_yes '卸载受管理配置并恢复原 SYSTEM？外部工具会保留。' || { printf '已取消。\n'; exit 1; }; fi
+      if owns_component system && test "$SYSTEM_STATUS" != normal && test "$SYSTEM_CHOICE_EXPLICIT" -eq 0; then
+        if test "$YES" -eq 1; then
+          printf 'SYSTEM 已被修改；请用 --keep-system 保留它，或用 --replace-system 恢复安装前版本。\n' >&2
+          exit 3
+        fi
+        if ask_yes 'SYSTEM 已被修改；卸载时恢复安装前版本？选择否将保留它。'; then REPLACE_SYSTEM=1; else KEEP_SYSTEM=1; fi
+      fi
+      if test "$YES" -ne 1; then ask_yes '卸载受管理配置？外部工具会保留。' || { printf '已取消。\n'; exit 1; }; fi
       acquire_workstation_lock || exit
       if ! workstation_uninstall; then
         release_workstation_lock

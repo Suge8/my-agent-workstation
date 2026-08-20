@@ -26,7 +26,7 @@ curl -fsSL https://raw.githubusercontent.com/Suge8/my-agent-workstation/main/ins
 
 - **Pi**：Agent 会话、模型和 Package 宿主。
 - **Herdr**：管理 Workspace、Tab、Pane 和 Agent 状态；它是必需运行条件。安装器使用官方校验脚本跟随最新稳定版，并用受管理 LaunchAgent 在登录时启动；Homebrew Formula 滞后时不拿旧版冒充最新。
-- **FireCode**：提供预设、状态栏、对抗审查和多 Agent 主控。
+- **FireCode**：提供预设、状态栏、对抗审查和多 Agent 主控；公开配置见 [FireCode 配置说明](resources/firecode/README.md)。
 - **Skills**：按任务加载的专业操作说明；不分发归档、`search-skills`、eval、缓存或 vendor。
 - **BCU**：独立 CLI、Broker 与原生 Helper，用于控制 macOS 应用。上游归属见其 [package README](packages/better-computer-use/README.md)。
 - **agent-browser + CloakBrowser**：隔离的网页自动化环境。Helium 只是可选日常浏览器。
@@ -48,7 +48,17 @@ curl -fsSL https://raw.githubusercontent.com/Suge8/my-agent-workstation/main/ins
 
 模型供应商先由 `pi auth check --no-refresh` 检测。已认证模型会生成 Pi、FireCode 预设、Master 与 Review 配置；不可用模型会被禁用，不会留下假成功配置。需要替换推荐模型时按[模型选择说明](resources/models/README.md)通过 `--selections <json>` 提供选择，安装器会保存并在更新时复用；无关 Pi 设置和自定义预设保持不变。
 
-所有改动先备份。Ghostty 与 Zsh 只插入带标记的受管理片段；卸载只移除这些片段。SYSTEM 是完整替换项，非交互安装必须显式选择 `--replace-system` 或 `--keep-system`。已有 Homebrew Herdr 的迁移会停止现有 Pane，因此必须另行确认并传入 `--migrate-herdr`。
+所有改动先备份。Ghostty 与 Zsh 只插入带标记的受管理片段。首次非交互安装仍需明确选择保留或替换 SYSTEM；未被用户修改的受管理 SYSTEM 会随稳定版更新，用户改过后保持原样，直到明确选择保留或替换。已有 Homebrew Herdr 的迁移会停止现有 Pane，因此必须另行确认并传入 `--migrate-herdr`。
+
+卸载只移除本工作站拥有的内容。agent-browser、CloakBrowser、Ghostty、Starship、Fastfetch 和 Helium 等包管理器工具会保留。
+
+## 维护发行快照
+
+```bash
+./maintain sync
+```
+
+该命令从 `$HOME` 下的标准位置同步 FireCode、现役 Skills 和 SYSTEM，清除私人路径与排除项，然后运行项目测试。需要时可用 `--firecode`、`--skills` 和 `--system` 指定其他维护源。它不会提交、打标签、推送或发布。
 
 ## 开发验证
 
