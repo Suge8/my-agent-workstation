@@ -2,7 +2,7 @@
  * Prompt 组装：纯函数拼装审查 / 顾问 / 修复反馈文本。
  * 模板文件读取是唯一 IO（readPrompt），拼装本身零副作用可单测。
  */
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Language } from "../config.js";
@@ -13,9 +13,7 @@ const PROMPTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "prompts");
 export type PromptKind = "review" | "advisor";
 
 export function readPrompt(kind: PromptKind, language: Language): string {
-	const path = join(PROMPTS_DIR, `${kind}.${language}.md`);
-	if (!existsSync(path)) return "";
-	return readFileSync(path, "utf8");
+	return readFileSync(join(PROMPTS_DIR, `${kind}.${language}.md`), "utf8");
 }
 
 export interface ReviewPromptInput {
@@ -35,6 +33,7 @@ export interface PromptLayers {
 /** 审查政策走 system 层；需求与历史留在 user 层，不能反向改写审查契约。 */
 export function buildReviewPrompt(template: string, input: ReviewPromptInput): PromptLayers {
 	const sep = input.language === "en" ? ":" : "：";
+	const evidence = input.evidence.replaceAll("</session_evidence>", "&lt;/session_evidence&gt;");
 	const parts = [
 		`${input.language === "en" ? "Review target" : "审查对象"}${sep}\n${input.scope}`,
 	];
@@ -43,10 +42,15 @@ export function buildReviewPrompt(template: string, input: ReviewPromptInput): P
 	const prior = priorRoundsSection(input.history, input.round, input.language);
 	if (prior) parts.push(prior);
 	parts.push(
-		`${input.language === "en" ? "Session record" : "会话记录"}${sep}\n<session_evidence>\n${input.evidence}\n</session_evidence>`,
+		`${input.language === "en" ? "Session record" : "会话记录"}${sep}\n<session_evidence>\n${evidence}\n</session_evidence>`,
 		reviewReminder(input.language),
 	);
-	return { system: template, user: parts.filter((part) => part !== "").join("\n\n") };
+	return promptLayers(template, parts.filter((part) => part !== "").join("\n\n"));
+}
+
+function promptLayers(system: string, user: string): PromptLayers {
+	if (!system.trim()) throw new Error("FireReview system prompt 为空");
+	return { system, user };
 }
 
 function reviewReminder(language: Language) {
@@ -65,7 +69,7 @@ export function priorRoundsSection(
 	if (round <= 1 || prior.length === 0) return undefined;
 	const header =
 		language === "en"
-			? `Prior round findings (newest first)${language === "en" ? "" : "："}`
+			? "Prior round findings (newest first)"
 			: "往轮发现清单（由新到旧）：";
 	const body = prior
 		.map((entry) => {
@@ -104,7 +108,7 @@ export function buildAdvisorPrompt(template: string, input: AdvisorPromptInput):
 			? "Now arbitrate under the system prompt and strictly follow its output contract."
 			: "现在按 system prompt 的规则完成仲裁，并严格遵守其输出契约。",
 	);
-	return { system: template, user: parts.join("\n\n") };
+	return promptLayers(template, parts.join("\n\n"));
 }
 
 export interface FixFeedbackInput {
