@@ -1,15 +1,13 @@
 ---
 name: workstation-setup
-description: 维护 My Agent Workstation：检查、解释、配置、验证、更新、修复或卸载已安装环境。首次安装且 Pi 不可用时改走 Shell 向导。
+description: 配置或维护 My Agent Workstation；用户说“继续配置工作站”，或要求检查、验证、更新、修复、卸载工作站时使用。Pi 尚未安装时引导运行公开安装命令。
 ---
 
-# 工作站维护
+# 工作站控制面
 
-`setup` 是唯一控制面；本 Skill 只定位并调用它，不实现安装动作。
+`setup` 是唯一控制面；本 Skill 只调用它，不手工复制安装逻辑。
 
-## 1. 定位控制面
-
-运行时按固定优先级解析路径：
+## 1. 定位
 
 ```bash
 if test -n "${MYAW_SETUP:-}"; then
@@ -20,41 +18,41 @@ else
   test -n "$root" || exit 1
   setup=$root/setup
 fi
-test -n "$setup" && test -x "$setup"
+test -x "$setup"
 ```
 
-只接受这两个来源。定位失败时停止；若是首次安装或没有 Pi，让用户在自己的仓库 checkout 中运行 `./setup`，由中文 Shell 向导完成，不在 Agent 中重建流程。
+定位失败时，让用户运行 README 的公开安装命令；该命令会先装好 Pi、Herdr 和本 Skill。不要在 Agent 中重建安装步骤。
 
-**完成：** `setup` 指向可执行文件，且路径来自 `MYAW_SETUP` 或状态记录的 `installation_root`。
+**完成：** `setup` 来自 `MYAW_SETUP` 或安装状态中的 `installation_root`。
 
-## 2. 先诊断并解释
+## 2. 诊断
 
-始终先运行：
+运行 `"$setup" doctor --json`，按退出码和结构化状态解释当前环境。诊断失败或输出无效时原样报告并停止。
 
-```bash
-"$setup" doctor --json
-```
+用户要继续首次配置且 `model_auth` 不是 `normal` 时，说明模型能力尚未启用，让用户在 Pi 中运行 `/login`；用户完成后重新诊断。OAuth 规则见 [CONFIRMATIONS.md](CONFIRMATIONS.md)。
 
-按原始退出码判断命令是否成功，以结构化字段判断环境是否健康。用中文说明系统是否受支持、每个组件的状态、阻塞项，以及哪些问题需要用户操作；不得展示凭据。诊断失败或输出无效时原样说明错误并停止变更。
+**完成：** 当前状态和唯一下一步已经明确；变更尚未开始。
 
-**完成：** 用户已经看到当前状态、问题和下一步；尚未执行变更。
+## 3. 收敛
 
-## 3. 按明确意图行动
+以 `"$setup" --help` 为参数事实源：
 
-以 `"$setup" --help` 为当前命令与参数的事实源，并只执行与用户明确意图对应的能力：
+- “继续配置工作站”默认收敛到 `apply --mode full`。
+- 只检查或解释时停在诊断；预览时只运行 `plan`。
+- 更新、修复、验收、卸载分别使用 `update`、`repair`、`verify`、`uninstall`。
 
-- 只检查或询问原因：停在 `doctor --json` 的解释。
-- 预览变更：调用 `plan`，解释动作、影响和保留项。
-- 安装、补装或配置：先 `plan`，确认后调用 `apply`。按当前对话语言传 `--architecture-language zh` 或 `en`；判断不了时询问一次。
-- 验收环境：调用 `verify`。
-- 更新、修复或卸载：分别调用 `update`、`repair` 或 `uninstall`；先展示该命令给出的计划。
+变更前读取 [CONFIRMATIONS.md](CONFIRMATIONS.md)，取得当前计划需要的选择，再运行带相同参数的 `plan`。向用户展示动作和保留项，明确确认后才执行；按对话语言传 `--architecture-language zh|en`。用户改了选择就重新生成计划。
 
-计划涉及覆盖、卸载、SYSTEM、独立 FireCode 迁移、权限、OAuth 或密钥时，先读取并执行 [CONFIRMATIONS.md](CONFIRMATIONS.md)。用户未明确选择时停在计划；不把自然语言猜测当授权。所有实际读写仍由 `setup` 完成。
+**完成：** 执行内容与用户确认的计划完全一致，或安全停在待确认状态。
 
-**完成：** 只调用了所请求的生命周期能力；每个敏感关口已有明确选择，或流程安全停住。
+## 4. 验收
 
-## 4. 收尾
+执行 `apply` 后先判断退出码，再读取 JSON 的 `valid`：
 
-变更命令成功后调用 `verify`，再调用 `doctor --json` 解释最终状态。命令失败时报告退出码、失败动作和控制面给出的恢复建议，不以其他命令或手工改文件绕过。
+- 退出码非零：核心安装失败，报告失败动作并停止。
+- 退出码为零且 `valid` 为 `false`：安装已落盘，按返回状态引导用户完成认证、权限或密钥。
+- 退出码为零且 `valid` 为 `true`：进入最终验收。
 
-**完成：** `verify` 通过且最终诊断无待处理问题；若仍依赖用户授权或认证，则明确列出唯一下一步并标记未完成。
+随后运行 `verify` 和 `doctor --json`；不绕过控制面手改文件。配置或更新 Pi Package 后，让用户重启 Pi 一次，使快捷键和启动期配置生效。
+
+**完成：** `verify` 通过；若存在必须由人完成的操作，状态已保存且用户拿到唯一续跑步骤。

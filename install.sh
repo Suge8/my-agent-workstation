@@ -25,4 +25,13 @@ curl -fsSL "https://github.com/$REPOSITORY/archive/refs/tags/$tag.tar.gz" -o "$a
 tar -xzf "$archive" -C "$work"
 root=$(find "$work" -mindepth 1 -maxdepth 1 -type d -name 'my-agent-workstation-*' -print -quit)
 test -x "$root/setup" || { printf '%s\n' 'Release 缺少可执行 setup。' >&2; exit 1; }
-"$root/setup" "$@"
+if test -t 0; then
+  "$root/setup" "$@"
+elif (: </dev/tty) 2>/dev/null; then
+  "$root/setup" "$@" </dev/tty
+elif test "$#" -gt 0; then
+  "$root/setup" "$@"
+else
+  printf '%s\n' '交互安装需要终端；请在 Terminal 中重新运行。' >&2
+  exit 1
+fi

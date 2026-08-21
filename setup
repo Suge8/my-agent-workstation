@@ -7,6 +7,7 @@ PI_FORMULA='pi-coding-agent'
 STATE_HOME="${MYAW_HOME:-${XDG_DATA_HOME:-${HOME:?}/.local/share}/my-agent-workstation}"
 JSON=0
 YES=0
+WIZARD=0
 MODE=core
 REPLACE_SYSTEM=0
 KEEP_SYSTEM=0
@@ -208,7 +209,7 @@ detect() {
   MODEL_AUTH_STATUS=missing
   ready_providers=$(authenticated_providers)
   ready_models=$(available_models)
-  test -z "$ready_providers" || MODEL_AUTH_STATUS=normal
+  if test -n "$ready_providers" && test -n "$ready_models"; then MODEL_AUTH_STATUS=normal; fi
 
   BCU_PERMISSION_STATUS=missing
   if command -v bcu >/dev/null 2>&1 && bcu --help >/dev/null 2>&1; then
@@ -216,11 +217,8 @@ detect() {
     bcu_status=$(bcu status --json 2>/dev/null || true)
     if printf '%s' "$bcu_status" | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{try{const j=JSON.parse(s),r=j.result??j;process.exit(r.running===true?0:1)}catch{process.exit(1)}})' 2>/dev/null; then
       bcu_doctor=$(bcu doctor --json 2>/dev/null || true)
-      if printf '%s' "$bcu_doctor" | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{try{const j=JSON.parse(s),r=j.result??j,p=r.permissions,h=r.helper,b=r.broker;process.exit(p?.accessibility===true&&p?.screenRecording===true&&Number.isInteger(h?.protocolVersion)&&Number.isInteger(b?.pid)?0:1)}catch{process.exit(1)}})' 2>/dev/null; then
-        BCU_PERMISSION_STATUS=normal
-      else
-        BCU_PERMISSION_STATUS=conflict
-      fi
+      bcu_health=$(printf '%s' "$bcu_doctor" | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{try{const j=JSON.parse(s),r=j.result??j,p=r.permissions,h=r.helper,b=r.broker,transport=Number.isInteger(h?.protocolVersion)&&Number.isInteger(b?.pid),permissions=typeof p?.accessibility==="boolean"&&typeof p?.screenRecording==="boolean";process.stdout.write(!transport||!permissions?"conflict":p.accessibility&&p.screenRecording?"normal":"pending")}catch{process.stdout.write("conflict")}})' 2>/dev/null)
+      BCU_PERMISSION_STATUS=${bcu_health:-conflict}
     fi
   fi
 
@@ -389,7 +387,7 @@ run_action() {
   esac
 }
 
-is_valid() {
+core_is_valid() {
   test "$HOMEBREW_STATUS" = normal || return 1
   test "$NODE_STATUS" = normal || return 1
   case "$PI_STATUS" in normal|unknown) ;; *) return 1 ;; esac
@@ -398,12 +396,18 @@ is_valid() {
   test "$INTEGRATION_STATUS" = normal || return 1
   test "$PACKAGE_STATUS" = normal || return 1
   test "$ARCHITECTURE_STATUS" = normal || return 1
-  if test "$MODE" = full; then full_recommendation_ready || return 1; fi
   if owns_component system; then test "$SYSTEM_STATUS" = normal || return 1; fi
-  if test "$WITH_BCU" -eq 1; then test "$BCU_PERMISSION_STATUS" = normal || return 1; fi
+  if test "$WITH_BCU" -eq 1; then case "$BCU_PERMISSION_STATUS" in normal|pending) ;; *) return 1 ;; esac; fi
   if test "$WITH_BROWSER" -eq 1; then test "$BROWSER_STATUS" = normal || return 1; fi
   if test "$WITH_TERMINAL" -eq 1; then test "$TERMINAL_STATUS" = normal || return 1; fi
   if test "$WITH_HELIUM" -eq 1; then test "$HELIUM_STATUS" = normal || return 1; fi
+}
+
+is_valid() {
+  core_is_valid || return 1
+  if test "$MODE" = full; then test "$MODEL_AUTH_STATUS" = normal || return 1; fi
+  if test "$WITH_BCU" -eq 1; then test "$BCU_PERMISSION_STATUS" = normal || return 1; fi
+  if test "$WITH_SEARCH" -eq 1; then test "$SEARCH_STATUS" = normal || return 1; fi
 }
 
 print_verify() {
@@ -413,15 +417,24 @@ print_verify() {
     printf '{"valid":%s,"components":{' "$valid"
     printf '"homebrew":"%s","node":"%s","pi":"%s","herdr":"%s","herdr_service":"%s","pi_integration":"%s","workstation_package":"%s","architecture_wiki":"%s"' \
       "$HOMEBREW_STATUS" "$NODE_STATUS" "$PI_STATUS" "$HERDR_STATUS" "$SERVICE_STATUS" "$INTEGRATION_STATUS" "$PACKAGE_STATUS" "$ARCHITECTURE_STATUS"
-    printf '}}\n'
+    printf '},"capabilities":{"model_auth":"%s","bcu_permissions":"%s","browser":"%s","terminal":"%s","helium":"%s","search":"%s"}}\n' \
+      "$MODEL_AUTH_STATUS" "$BCU_PERMISSION_STATUS" "$BROWSER_STATUS" "$TERMINAL_STATUS" "$HELIUM_STATUS" "$SEARCH_STATUS"
   elif test "$valid" = true; then
-    printf '验证通过：核心运行时与所选工作站组件均可用。\n'
+    printf '验证通过：核心运行时与所选工作站能力均可用。\n'
+  elif ! core_is_valid; then
+    printf '安装未完成：核心组件验收失败，请重新运行安装命令。\n'
   else
-    if test "$WITH_BCU" -eq 1 && test "$BCU_PERMISSION_STATUS" != normal; then
-      printf '验证失败：BCU 需要 macOS 辅助功能和屏幕录制权限。请运行 bcu setup 后重试 setup verify。\n'
-    else
-      printf '验证失败，请运行 setup doctor 查看缺口。\n'
+    printf '配置已应用，还有以下用户操作：\n'
+    if test "$MODE" = full && test "$MODEL_AUTH_STATUS" != normal; then
+      printf '  - 在 Pi 中运行 /login 完成至少一个模型供应商认证。\n'
     fi
+    if test "$WITH_BCU" -eq 1 && test "$BCU_PERMISSION_STATUS" != normal; then
+      printf '  - 运行 bcu setup，授予辅助功能和屏幕录制权限。\n'
+    fi
+    if test "$WITH_SEARCH" -eq 1 && test "$SEARCH_STATUS" != normal; then
+      printf '  - 告诉 Agent“配置搜索凭据”，将 Brave 和 Exa 密钥写入钥匙串。\n'
+    fi
+    printf '完成后告诉 Agent“继续验收”。\n'
   fi
   test "$valid" = true
 }
@@ -430,12 +443,11 @@ write_state() {
   mkdir -p "$STATE_HOME"
   STATE_FILE="$STATE_HOME/state.json" INSTALLATION_ROOT="$RUNTIME_HOME" MODE_VALUE="$MODE" VERSION_VALUE="$WORKSTATION_VERSION" \
   WITH_BCU_VALUE="$WITH_BCU" WITH_BROWSER_VALUE="$WITH_BROWSER" WITH_TERMINAL_VALUE="$WITH_TERMINAL" WITH_HELIUM_VALUE="$WITH_HELIUM" \
-  ARCHITECTURE_LANGUAGE_VALUE="$ARCHITECTURE_LANGUAGE" node - <<'NODE'
+  WITH_SEARCH_VALUE="$WITH_SEARCH" ARCHITECTURE_LANGUAGE_VALUE="$ARCHITECTURE_LANGUAGE" node - <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
 const state = {
   schema: 1,
-  status: "ready",
   version: process.env.VERSION_VALUE,
   mode: process.env.MODE_VALUE,
   installation_root: process.env.INSTALLATION_ROOT,
@@ -445,6 +457,7 @@ const state = {
     browser: process.env.WITH_BROWSER_VALUE === "1",
     terminal: process.env.WITH_TERMINAL_VALUE === "1",
     helium: process.env.WITH_HELIUM_VALUE === "1",
+    search: process.env.WITH_SEARCH_VALUE === "1",
   },
 };
 const temporary = `${process.env.STATE_FILE}.${process.pid}.tmp`;
@@ -471,12 +484,12 @@ load_state_options() {
     const s=JSON.parse(require("fs").readFileSync(process.env.STATE_FILE,"utf8"));
     const x=s.selected||{},language=s.architecture_language||"zh";
     if (!["zh","en"].includes(language)) process.exit(1);
-    process.stdout.write([s.mode||"core",x.bcu?1:0,x.browser?1:0,x.terminal?1:0,x.helium?1:0,language].join(" "));
+    process.stdout.write([s.mode||"core",x.bcu?1:0,x.browser?1:0,x.terminal?1:0,x.helium?1:0,x.search?1:0,language].join(" "));
   ' 2>/dev/null) || return 1
-  IFS=' ' read -r MODE WITH_BCU WITH_BROWSER WITH_TERMINAL WITH_HELIUM stored_architecture_language <<EOF
+  IFS=' ' read -r MODE WITH_BCU WITH_BROWSER WITH_TERMINAL WITH_HELIUM WITH_SEARCH stored_architecture_language <<EOF
 $value
 EOF
-  MODE=${MODE:-core}; WITH_BCU=${WITH_BCU:-0}; WITH_BROWSER=${WITH_BROWSER:-0}; WITH_TERMINAL=${WITH_TERMINAL:-0}; WITH_HELIUM=${WITH_HELIUM:-0}
+  MODE=${MODE:-core}; WITH_BCU=${WITH_BCU:-0}; WITH_BROWSER=${WITH_BROWSER:-0}; WITH_TERMINAL=${WITH_TERMINAL:-0}; WITH_HELIUM=${WITH_HELIUM:-0}; WITH_SEARCH=${WITH_SEARCH:-0}
   if test "$ARCHITECTURE_LANGUAGE_EXPLICIT" -eq 0; then ARCHITECTURE_LANGUAGE=${stored_architecture_language:-zh}; fi
 }
 
@@ -485,10 +498,6 @@ guard_apply() {
   if test "$NODE_STATUS" = conflict; then printf '%s\n' 'Node/npm 工具链不完整；请修复后重试。' >&2; return 3; fi
   if test "$PI_STATUS" = conflict && test "$PI_SOURCE" != homebrew && test "$PI_SOURCE" != npm+homebrew; then
     if test "$PI_SOURCE" = source; then printf '%s\n' '检测到源码 Pi；为避免覆盖已拒绝应用。' >&2; else printf '%s\n' 'npm Pi 命令不可用；请检查 PATH。' >&2; fi
-    return 3
-  fi
-  if test "$MODE" = full && ! full_recommendation_ready; then
-    printf '%s\n' '完整同款需要可用的完整推荐配置；请先完成模型认证，或显式提供模型替换。' >&2
     return 3
   fi
   if test "$FIRECODE_STATUS" = independent && test "$MIGRATE_FIRECODE" -ne 1; then
@@ -527,14 +536,22 @@ apply_plan() {
     if test "$YES" -eq 1; then printf '搜索凭据未自动写入；请运行 setup configure-search。\n' >&2; else workstation_configure_search || return; fi
   fi
   detect
-  if is_valid; then write_state; fi
+  if ! core_is_valid; then
+    release_workstation_lock
+    print_verify
+    return 1
+  fi
+  write_state || return
   release_workstation_lock
-  print_verify
+  print_verify || true
+  if test "$WIZARD" -eq 1; then
+    printf '%s\n' '基础环境已装好。现在运行 pi；如尚未登录模型，先执行 /login，然后告诉 Agent：“继续配置工作站”。'
+  fi
 }
 
 main() {
   command=${1:-}
-  if test -z "$command"; then workstation_wizard || exit; command=apply; else
+  if test -z "$command"; then WIZARD=1; workstation_wizard || exit; command=apply; else
     if test "$command" = update; then UPDATE_FORWARD_ARGS=("${@:2}"); fi
     case "$command" in
       doctor|plan|apply|verify|update|repair|uninstall|configure-search) parse_options "$@" ;;

@@ -20,3 +20,4 @@ Before a release:
 
 1. Run `./maintain sync` and review the generated diff. Active Skill symlinks are copied by value, so confirm their targets are intended public inputs.
 2. Run `bun run test:pi-smoke` on a machine with the current global Pi installed. This host-integration check is intentionally outside CI.
+3. From a clean macOS user or disposable VM, run the public wizard from a checkout, start Pi, ask the Agent to continue configuring the workstation, and require `setup verify` to pass. Repeat once to verify idempotency, then interrupt one human authorization step and verify that the saved installation resumes.

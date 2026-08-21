@@ -262,16 +262,6 @@ available_models() {
   pi --list-models 2>/dev/null | awk 'NR > 1 && $1 != "provider" { print $1 "/" $2 }' | paste -sd, -
 }
 
-full_recommendation_ready() {
-  complete_providers=${ready_providers:-}
-  complete_models=${ready_models:-}
-  set -- --mode check-complete --profile "$ROOT/resources/models/recommended.json" --providers "$complete_providers" --available-models "$complete_models"
-  complete_selections=${SELECTIONS:-}
-  test -n "$complete_selections" || complete_selections="$STATE_HOME/model-selections.json"
-  if test -f "$complete_selections"; then set -- "$@" --selections "$complete_selections"; fi
-  node "$ROOT/scripts/configure-workstation.mjs" "$@" >/dev/null 2>&1
-}
-
 configure_pi() {
   mkdir -p "$PI_AGENT_HOME"
   if { owns_component pi-settings || owns_component pi-keybindings || owns_component firecode-config; } && test ! -f "$STATE_HOME/pi-managed.json"; then
@@ -622,33 +612,12 @@ ask_yes() {
 }
 
 workstation_wizard() {
-  printf '%s\n' 'My Agent Workstation：Pi 是 Agent 宿主，Herdr 管理终端工作区，FireCode 与 Skills 提供完整工作流。'
-  printf '%s\n' '1) 完整同款（推荐）  2) 核心安装  3) 自定义'
-  printf '请选择 [1]: '
-  IFS= read -r choice || choice=1
-  case "${choice:-1}" in
-    1) MODE=full ;;
-    2) MODE=core ;;
-    3)
-      MODE=custom
-      ask_yes '安装 BCU 桌面控制？' && WITH_BCU=1
-      ask_yes '安装隔离浏览器自动化？' && WITH_BROWSER=1
-      ask_yes '安装 Ghostty 与终端美化？' && WITH_TERMINAL=1
-      if test "$WITH_TERMINAL" -eq 1; then ask_yes '安装 Helium 日常浏览器？' && WITH_HELIUM=1; fi
-      ask_yes '配置搜索凭据？' && WITH_SEARCH=1
-      ;;
-    *) printf '无效选择。\n' >&2; return 64 ;;
-  esac
-  printf 'Architecture Wiki 语言 [zh/en，默认 zh]: '
+  MODE=core
+  printf '%s\n' '先安装 Pi、Herdr 和 Workstation Skill；随后由 Agent 接手其余配置。'
+  printf 'Agent 文档语言 [zh/en，默认 zh]: '
   IFS= read -r architecture_language || architecture_language=
   ARCHITECTURE_LANGUAGE=${architecture_language:-zh}
   case "$ARCHITECTURE_LANGUAGE" in zh|en) ;; *) printf '无效语言。\n' >&2; return 64 ;; esac
   ARCHITECTURE_LANGUAGE_EXPLICIT=1
-  printf '模型选择 JSON 路径（留空则按现有认证自动启用并禁用不可用角色）: '
-  IFS= read -r model_choices || model_choices=
-  if test -n "$model_choices"; then
-    test -f "$model_choices" || { printf '文件不存在: %s\n' "$model_choices" >&2; return 64; }
-    SELECTIONS=$model_choices
-  fi
   if ask_yes '完整替换 Pi SYSTEM 提示词？原文件会备份。'; then REPLACE_SYSTEM=1; else KEEP_SYSTEM=1; fi
 }

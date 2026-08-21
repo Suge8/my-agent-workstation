@@ -15,11 +15,9 @@ function args(argv) {
 	}
 	const required = options.mode === "validate"
 		? ["ownership"]
-		: options.mode === "check-complete"
-			? ["profile", "providers", "available-models"]
-			: options.mode === "restore"
-				? ["pi-settings", "pi-keybindings", "pi-settings-backup", "pi-keybindings-backup", "firecode", "ownership"]
-				: ["profile", "pi-settings", "pi-keybindings", "firecode", "ownership"];
+		: options.mode === "restore"
+			? ["pi-settings", "pi-keybindings", "pi-settings-backup", "pi-keybindings-backup", "firecode", "ownership"]
+			: ["profile", "pi-settings", "pi-keybindings", "firecode", "ownership"];
 	for (const name of required) if (!options[name]) throw new Error(`缺少 --${name}`);
 	return options;
 }
@@ -211,17 +209,6 @@ function baseConfiguration(profile, providers, settings, keybindings, firecode) 
 	};
 }
 
-function recommendationIsComplete(profile, providers, available, supplied) {
-	const providerSet = new Set(providers);
-	const availableSet = new Set(available);
-	if (["presets", "master", "review"].some((capability) => supplied.disabled?.includes(capability))) return false;
-	return Object.entries(profile.models).every(([alias, model]) => {
-		const selected = Object.hasOwn(supplied.models ?? {}, alias) ? supplied.models[alias] : modelRef(model);
-		if (selected === null || typeof selected !== "string" || !selected.includes("/")) return false;
-		return providerSet.has(selected.slice(0, selected.indexOf("/"))) && availableSet.has(selected);
-	});
-}
-
 function automaticSelections(profile, providers, available, supplied) {
 	const providerSet = new Set(providers);
 	const availableSet = new Set(available);
@@ -303,30 +290,13 @@ export async function configure(options) {
 	return { configuredModels: rendered.piSettings.enabledModels?.length ?? 0, providers };
 }
 
-async function checkComplete(options) {
-	const [profile, supplied] = await Promise.all([
-		readObject(resolve(options.profile)),
-		options.selections ? readObject(resolve(options.selections)) : {},
-	]);
-	const complete = recommendationIsComplete(
-		profile,
-		options.providers.split(",").filter(Boolean),
-		options["available-models"].split(",").filter(Boolean),
-		supplied,
-	);
-	if (!complete) throw new Error("完整同款需要可用的完整推荐配置；请先完成模型认证，或显式提供模型替换");
-	return { complete: true };
-}
-
 if (process.argv[1] && resolve(fileURLToPath(import.meta.url)) === resolve(process.argv[1])) {
 	const options = args(process.argv.slice(2));
 	const operation = options.mode === "restore"
 		? restore(options)
 		: options.mode === "validate"
 			? readOwnership(resolve(options.ownership), true)
-			: options.mode === "check-complete"
-				? checkComplete(options)
-				: configure(options);
+			: configure(options);
 	operation
 		.then((result) => process.stdout.write(`${JSON.stringify(result ?? { restored: true })}\n`))
 		.catch((error) => {

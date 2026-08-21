@@ -1,73 +1,55 @@
 # My Agent Workstation
 
-English | [简体中文](README.zh-CN.md)
+简体中文 | [English](README.en.md)
 
-Reproduce the same coding-agent workstation across Apple Silicon Macs. One command opens a Chinese setup wizard; existing components are updated or repaired instead of duplicated.
+在 Apple Silicon Mac 上装好一套由 Agent 接手维护的编码工作站：Pi、Herdr、FireCode、Skills、桌面与浏览器自动化，以及配套终端体验。
 
-Supports **Apple Silicon, macOS 14+, and Zsh only**.
+仅支持 **Apple Silicon、macOS 14 及以上、Zsh**。
 
-## Install
+## 开始
 
-The bootstrap downloads the latest stable GitHub Release, never an unreleased `main` snapshot:
+首个 Release 发布前，请从检出目录测试：
+
+```bash
+git clone https://github.com/Suge8/my-agent-workstation.git
+cd my-agent-workstation
+./setup
+```
+
+发布后，稳定入口将只下载最新 Release：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Suge8/my-agent-workstation/main/install.sh | bash
 ```
 
-Maintainers can run `./setup` from a checkout. The wizard offers:
+安装分两段完成：
 
-- **Full matching setup (recommended):** core runtime, desktop/browser automation, Ghostty, and terminal polish.
-- **Core:** Pi, Herdr, FireCode, active Skills, SYSTEM, and model configuration.
-- **Custom:** select BCU, browser automation, terminal tools, Helium, and search independently.
+1. Shell 向导先安装 Pi、Herdr 和 Workstation Skill，不要求你预先配置模型。
+2. 运行 `pi`；如尚未登录模型，先执行 `/login`。
+3. 告诉 Agent：**“继续配置工作站”**。
+4. 按提示完成授权并重启一次 Pi。
 
-“One command” does not bypass macOS permissions, provider OAuth, API-key entry, or confirmation before replacing SYSTEM.
+Agent 会诊断当前环境、展示计划，并接手其余配置。只有模型 OAuth、API Key、macOS 权限和 SYSTEM 替换需要你本人确认；未认证的模型能力会明确保持关闭，不会被静默替换。
 
-## Included
+## 装好后
 
-- **Pi:** agent sessions, models, and package host.
-- **Herdr:** required workspace, tab, pane, and agent-state manager. The verified official installer tracks the latest stable release, while a managed LaunchAgent starts it at login.
-- **FireCode:** presets, status UI, adversarial review, and multi-agent control. Configuration is documented in the [FireCode guide](packages/firecode/README.md).
-- **Skills:** task-specific operating guidance, excluding archives, `search-skills`, evals, caches, and vendors. Both Architecture Wiki languages ship as Release assets, but only one is activated.
-- **BCU:** standalone CLI, Broker, and native Helper for macOS app control. Attribution is documented in its [package README](packages/better-computer-use/README.md).
-- **agent-browser + CloakBrowser:** isolated web automation. Helium is only an optional daily browser.
-- **Ghostty + Starship + Fastfetch:** optional terminal, prompt, and startup system summary. Zsh suggestions and highlighting load directly without Oh My Zsh.
+默认推荐配置包括：
 
-## Operate
+- Pi、Herdr、FireCode、现役 Skills 与 Architecture Wiki；
+- BCU 桌面控制和隔离浏览器自动化；
+- Ghostty、Starship、Fastfetch、Zsh 自动建议与语法高亮；
+- 根据已认证供应商生成的模型循环、快捷预设、Review 与 Master 配置。
 
-```bash
-./setup doctor --json          # read-only diagnosis
-./setup plan --mode full       # preview changes
-./setup verify                 # verify selected capabilities
-./setup update --yes           # update stable managed components
-./setup repair --yes           # repair diagnosed gaps
-./setup uninstall              # remove managed content, retain backups and external tools
-./setup configure-search       # store Brave/Exa keys in macOS Keychain
-```
+以后直接告诉 Agent“检查工作站”“更新工作站”或“修复工作站”即可。所有动作始终收口到同一个 `setup` 控制面。
 
-The installed `workstation-setup` Skill delegates to the same control plane. Brave and Exa read environment variables first, then macOS Keychain; Context7 keeps its own OAuth. Secrets never enter shell configuration, state files, or the repository.
+## 安全与保留
 
-Provider readiness is checked with `pi auth check --no-refresh`. Full mode starts changing the machine only when authentication or explicit replacements can produce the complete recommendation; otherwise it stops clearly. Follow the [model selection format](resources/models/README.md) and pass `--selections <json>` to replace recommended models. Selections, user-edited managed Pi/FireCode fields, unrelated settings, and custom presets survive updates.
+安装器先备份再接管，只更新和卸载自己拥有的内容。用户设置、自定义 FireCode 预设和外部工具会保留；凭据只进入供应商 OAuth 或 macOS 钥匙串，不写入仓库、Shell 配置和状态文件。
 
-Agents pass `--architecture-language zh|en` from the conversation language; non-interactive Shell defaults to Chinese. The persisted choice survives update and repair, while an explicit new value atomically switches the sole active variant.
+已有独立 FireCode 或 Homebrew Herdr 时，安装器会停止并要求明确迁移，不会直接覆盖。卸载后，包管理器安装的 Ghostty、浏览器等外部工具仍会保留。
 
-Every managed replacement is backed up. Ghostty and Zsh receive removable marked fragments. First-time non-interactive setup must explicitly keep or replace SYSTEM. An untouched managed SYSTEM follows stable updates; a locally edited SYSTEM is left unchanged until the user explicitly keeps or replaces it. Existing standalone FireCode makes setup stop unless `--migrate-firecode` is explicit; Homebrew Herdr likewise requires `--migrate-herdr`.
+## 维护者
 
-Uninstall removes only content owned by this workstation. Package-manager tools such as agent-browser, CloakBrowser, Ghostty, Starship, Fastfetch, and Helium remain installed.
+从检出目录运行 `./setup` 可以预览、应用和验证指定模式。模型替换格式见[模型选择](resources/models/README.md)，发行快照与测试流程见[贡献指南](.github/CONTRIBUTING.md)，安全报告见[安全策略](.github/SECURITY.md)。
 
-## Maintain
-
-```bash
-./maintain sync
-```
-
-This consumes only clean, committed FireCode, active Skills, Architecture Wiki, and SYSTEM sources and reports every source commit. Unrelated `.pi` changes do not block SYSTEM sync. Optional `--firecode`, `--skills`, `--architecture`, and `--system` paths override the defaults. It never pulls, commits, tags, pushes, or publishes.
-
-## Develop
-
-```bash
-bun run test
-bun run check:shell
-npm run test:bcu
-```
-
-See [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) and [.github/SECURITY.md](.github/SECURITY.md). This repository uses the [MIT License](LICENSE); bundled third-party code retains its own notices.
+本仓库采用 [MIT License](LICENSE)，随附第三方代码保留各自声明。

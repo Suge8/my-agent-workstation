@@ -13,13 +13,14 @@ test("workstation setup skill delegates the guarded lifecycle to the dynamic set
 
 	expect(main.indexOf("MYAW_SETUP")).toBeLessThan(main.indexOf("installation_root"));
 	expect(main).toContain('"$setup" doctor --json');
-	for (const command of ["plan", "apply", "verify", "update", "repair", "uninstall"]) {
-		expect(main).toContain(`\`${command}\``);
-	}
+	expect(main).toContain("apply --mode full");
+	expect(main).toMatch(/执行 `apply` 后[\s\S]*`valid`[\s\S]*`verify`[\s\S]*doctor --json/);
+	expect(main).toContain("重启 Pi");
 	for (const gate of ["覆盖", "卸载", "SYSTEM", "权限", "OAuth", "密钥"]) {
 		expect(contract).toContain(gate);
 	}
 	expect(main).toContain("CONFIRMATIONS.md");
-	expect(main).toMatch(/没有 Pi[\s\S]*Shell 向导/);
+	expect(main).toContain("继续配置工作站");
+	expect(main).toMatch(/定位失败[\s\S]*公开安装命令/);
 	expect(contract).not.toMatch(/\/Users\/|\bbrew (?:install|upgrade|uninstall)\b|\bnpm install\b/);
 });

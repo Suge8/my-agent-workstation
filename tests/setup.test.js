@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const setup = resolve(import.meta.dir, "../setup");
+const installer = resolve(import.meta.dir, "../install.sh");
 const roots = [];
 setDefaultTimeout(90000);
 
@@ -108,7 +109,7 @@ case "$name" in
       "--version") has herdr || exit 1; value herdr_version ;;
       "integration status") if has integration; then printf 'Pi: current (v2)\\n'; else printf 'Pi: not installed\\n'; fi ;;
       "channel set stable") log "$@" ;;
-      "integration install pi") log "$@"; touch "$state/integration" ;;
+      "integration install pi") log "$@"; has integration_install_noop || touch "$state/integration" ;;
       "integration uninstall pi") log "$@"; rm -f "$state/integration" ;;
       *) exit 1 ;;
     esac
@@ -195,7 +196,7 @@ esac
     FAKE_STATE: fakeState, FAKE_LOG: log, FAKE_COMMAND: dispatcher, REAL_NODE: process.execPath,
     BREW_PREFIX: brewPrefix, SHELL: join(bin, "zsh"), XDG_CONFIG_HOME: join(home, ".config"),
   };
-  const runFrom = (program, args, input) => spawnSync(program, args, { env, input, encoding: "utf8", timeout: 30000 });
+  const runFrom = (program, args, input, options = {}) => spawnSync(program, args, { env, input, encoding: "utf8", timeout: 30000, ...options });
   const run = (args, input) => runFrom(setup, args, input);
   return { root, home, managed, fakeState, log, env, run, runFrom };
 }
@@ -253,6 +254,27 @@ describe("setup public CLI", () => {
     const result = fixture(ready()).run(["apply", "--yes", "--json"]);
     expect(result.status).toBe(64);
     expect(result.stderr).toContain("--replace-system");
+  });
+
+  test("public wizard bootstraps the Agent before optional workstation configuration", () => {
+    const f = fixture(ready());
+    const result = f.run([], "\nn\ny\n");
+    expect(result.status).toBe(0, result.stderr);
+    expect(result.stdout).toContain("先安装 Pi、Herdr 和 Workstation Skill");
+    expect(result.stdout).toContain("继续配置工作站");
+    expect(result.stdout).not.toContain("模型选择 JSON");
+    const state = JSON.parse(readFileSync(join(f.managed, "state.json"), "utf8"));
+    expect(state.mode).toBe("core");
+    expect(state.installation_root).toBe(join(f.managed, "runtime"));
+  });
+
+  test("core postcondition failures return an error and do not publish resumable state", () => {
+    const f = fixture(ready({ integration_install_noop: "" }));
+    rmSync(join(f.fakeState, "integration"));
+    const result = apply(f);
+    expect(result.status).toBe(1);
+    expect(JSON.parse(result.stdout)).toMatchObject({ valid: false, components: { pi_integration: "missing" } });
+    expect(existsSync(join(f.managed, "state.json"))).toBe(false);
   });
 
   test("fresh core install bootstraps tools, installs the Pi package, and is idempotent", () => {
@@ -509,13 +531,15 @@ describe("setup public CLI", () => {
     expect(existsSync(join(f.managed, "backups", "independent-firecode", "index.ts"))).toBe(true);
   });
 
-  test("full mode stops before mutation when the complete model recommendation is unavailable", () => {
+  test("full mode installs available capabilities and leaves model setup resumable", () => {
     const f = fixture(ready());
     const result = apply(f, "full");
-    expect(result.status).toBe(3);
-    expect(result.stderr).toContain("完整推荐配置");
-    expect(existsSync(f.managed)).toBe(false);
-    expect(existsSync(f.log)).toBe(false);
+    expect(result.status).toBe(0, result.stderr);
+    expect(JSON.parse(result.stdout).valid).toBe(false);
+    expect(existsSync(join(f.managed, "state.json"))).toBe(true);
+    expect(existsSync(join(f.managed, "runtime", "setup"))).toBe(true);
+    const config = JSON.parse(readFileSync(join(f.home, ".pi", "agent", "extensions", "firecode", "config.jsonc"), "utf8"));
+    expect(config.features).toMatchObject({ presets: false, master: false, review: false });
   });
 
   test("runtime FireCode configuration write failures fail apply", () => {
@@ -569,6 +593,16 @@ describe("setup public CLI", () => {
     expect(readFileSync(init, "utf8")).toContain("STARSHIP_CONFIG");
   });
 
+  test("release bootstrap requires a terminal only for its interactive path", () => {
+    const f = fixture({ release: "" });
+    const interactive = f.runFrom(installer, [], "", { detached: true });
+    expect(interactive.status).toBe(1);
+    expect(interactive.stderr).toContain("交互安装需要终端");
+    const explicit = f.runFrom(installer, ["apply", "--yes"], "");
+    expect(explicit.status).toBe(0, explicit.stderr);
+    expect(readFileSync(f.log, "utf8")).toContain("updated apply --yes");
+  });
+
   test("release update forwards the user's explicit conflict choices", () => {
     const f = fixture(ready({ release: "" }));
     const updated = f.run(["update", "--yes", "--json", "--replace-system", "--migrate-herdr"]);
@@ -608,13 +642,13 @@ describe("setup public CLI", () => {
     expect(readFileSync(zshrc, "utf8")).toBe(existing);
   });
 
-  test("full mode refuses ready state until BCU permissions are usable", () => {
+  test("pending permissions keep a successful full install resumable", () => {
     const f = fixture(completeAuth({ bcu_permissions_missing: "" }));
     const result = apply(f, "full");
-    expect(result.status).toBe(1);
-    expect(JSON.parse(result.stdout).valid).toBe(false);
-    expect(result.stderr).toContain("configure-search");
-    expect(existsSync(join(f.managed, "state.json"))).toBe(false);
+    expect(result.status).toBe(0, result.stderr);
+    expect(JSON.parse(result.stdout)).toMatchObject({ valid: false, capabilities: { bcu_permissions: "pending" } });
+    const state = JSON.parse(readFileSync(join(f.managed, "state.json"), "utf8"));
+    expect(state.selected).toMatchObject({ bcu: true, search: true });
   });
 
   test("search setup keeps secrets out of output, logs, and shell config", () => {
