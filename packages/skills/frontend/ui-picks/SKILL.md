@@ -1,6 +1,6 @@
 ---
 name: ui-picks
-description: 个人 UI 库选型表：需要动效组件、图标动效、canvas 特效、AI 聊天界面、界面音效、字体搭配等能力时查表选库，按指定方式安装最新版本；用户说"选型库 / 我的库 / 用什么库"时也使用。
+description: 个人 UI 库选型表：需要动效组件、canvas 特效、AI 聊天界面、界面音效、字体搭配等能力时查表选库，按指定方式安装最新版本；用户说"选型库 / 我的库 / 用什么库"时也使用。
 ---
 
 # UI Picks
@@ -22,7 +22,7 @@ description: 个人 UI 库选型表：需要动效组件、图标动效、canvas
 - Cover-flow、扇形展开、arc、time-machine 等卡片空间编排和微转场；站点 [amicro.vercel.app](https://amicro.vercel.app)。
 - 获取：从站点组件页直接复制源码进项目（依赖 Motion）。官方 `npx @subhanhq/amicro@latest add` 实测不可用（npm 包无可执行入口，2026-08 验证），修复前不要用。
 - 无 llms.txt，文档是纯客户端渲染，选组件靠站点浏览。
-- 落地后按 ui-craft 的弹簧与空间连续性纪律收口（同一几何关系派生、可中断、reduced-motion）。
+- 落地后按 ui-craft「弹簧与空间连续性」收口。
 
 ### OriginKit — 文字动效 / 光标特效 / 图片画廊 / 背景动画（React / Framer）
 
@@ -61,6 +61,13 @@ description: 个人 UI 库选型表：需要动效组件、图标动效、canvas
 - 任意 stroke 图标平滑变形到另一个（menu→X、play→pause 等），可中断弹簧物理，零配置零依赖 ~6-8KB；站点 [morphicons.com](https://www.morphicons.com)，机读 <https://www.morphicons.com/llms.txt>（完整 API 在 llms-full.txt）。
 - 安装：`npm i morphicons`，按框架取 `morphicons/react|vue|svelte|react-native|dom` 入口；图标以数据形式导入（装 `lucide` 包，不是 `lucide-react` 组件）。SSR 干净、默认 `aria-hidden`、自动尊重 reduced-motion。
 - 红线：只支持 stroke 图标（Lucide/Tabler/Heroicons outline/Iconoir 等）；非 24×24 网格的包先用 `fitIcon` 重排一次。
+
+### transitions.dev — 复制即用的 CSS 状态转场片段（框架无关）
+
+- 18 个界面状态转场配方：卡片 resize、数字翻转、菜单/Modal/Panel 开合、图标与文字交换、错误抖动等；站点 [transitions.dev](https://transitions.dev)。
+- 获取：`npx transitions-pro add <name>`（免费款无需账号，`list` 看全量；Pro 需浏览器登录）或站点卡片直接复制。片段自含 `:root` 语义变量、`t-*` 命名空间类和 reduced-motion guard，可贴进任意项目。
+- 红线：多款默认带 blur，与 ui-craft「blur 非默认入场属性」冲突，实测流畅且视觉语言支持才保留；其 `:root` token 与项目已有动效变量二选一，不并存两套事实源。
+- 分工：这里管既有元素的状态转场 CSS；卡片空间编排用 Amicro，图标 morph 用 morphicons。
 
 ### assistant-ui — 产品内 AI 聊天界面（React/TS）
 
