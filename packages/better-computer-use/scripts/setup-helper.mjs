@@ -7,9 +7,10 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveMacosHelperAppPath } from "../src/platform/macos/helper-path.mjs";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const helperAppPath = process.env.BCU_HELPER_APP_PATH ?? "/Applications/bcu.app";
+const helperAppPath = resolveMacosHelperAppPath();
 const helperExecutablePath = path.join(helperAppPath, "Contents", "MacOS", "bridge");
 const helperSourceHashPath = path.join(helperAppPath, "Contents", "Resources", "source.sha256");
 const helperBundleId = "dev.myagentworkstation.bcu";
@@ -54,7 +55,7 @@ function comparableInfo(info) {
 }
 
 async function registerHelperApp() {
-	if (helperAppPath !== "/Applications/bcu.app") return;
+	if (process.env.BCU_HELPER_APP_PATH) return;
 	const lsregister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
 	if (await exists(lsregister)) await run(lsregister, ["-f", helperAppPath]).catch(() => {});
 }

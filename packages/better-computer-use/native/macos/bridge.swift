@@ -390,6 +390,8 @@ final class Bridge {
 	private let maxRootObservers = 4
 	private let permissionCacheLock = NSLock()
 	private var grantedPermissionStatus: [String: Any]?
+	private let completedRequestLock = NSLock()
+	private var recentCompletedRequestIds: [String] = []
 
 	func run() {
 		if CommandLine.arguments.contains("serve") {
@@ -421,6 +423,7 @@ final class Bridge {
 	}
 
 	private func runServer(socketPath: String) {
+		_ = signal(SIGPIPE, SIG_IGN)
 		try? FileManager.default.createDirectory(atPath: (socketPath as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
 		// LaunchServices may race multiple `open -n` requests while the first
 		// daemon is still binding. Keep process ownership separate from socket
@@ -450,25 +453,27 @@ final class Bridge {
 		while true {
 			let client = accept(server, nil, nil)
 			if client < 0 { continue }
+			var noSigPipe: Int32 = 1
+			_ = setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout.size(ofValue: noSigPipe)))
 			Thread.detachNewThread { [weak self] in self?.processClient(client) }
 		}
 	}
 
 	private func processClient(_ client: Int32) {
-		let clientOutput = FileHandle(fileDescriptor: client, closeOnDealloc: true)
+		let clientInput = FileHandle(fileDescriptor: client, closeOnDealloc: true)
 		var buffer = Data()
 		let newline = Data([0x0A])
 		while true {
-			let data = clientOutput.availableData
+			let data = clientInput.availableData
 			if data.isEmpty { break }
 			buffer.append(data)
 			while let range = buffer.range(of: newline) {
 				let lineData = buffer.subdata(in: 0..<range.lowerBound)
 				buffer.removeSubrange(0..<range.upperBound)
-				if let line = String(data: lineData, encoding: .utf8), !line.isEmpty { handleLine(line, to: clientOutput) }
+				if let line = String(data: lineData, encoding: .utf8), !line.isEmpty { handleLine(line, to: client) }
 			}
 		}
-		clientOutput.closeFile()
+		clientInput.closeFile()
 	}
 
 	private func processBufferedInput() {
@@ -483,11 +488,15 @@ final class Bridge {
 		}
 	}
 
-	private func handleLine(_ line: String, to responseOutput: FileHandle? = nil) {
+	private func handleLine(_ line: String, to responseSocket: Int32? = nil) {
 		let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
 		guard !trimmed.isEmpty else { return }
 
 		let fallbackId = "invalid"
+		var completionId: String?
+		defer {
+			if responseSocket != nil, let completionId { recordCompletedRequest(completionId) }
+		}
 		do {
 			guard let jsonData = trimmed.data(using: .utf8) else {
 				throw BridgeFailure(message: "Input was not valid UTF-8", code: "invalid_request")
@@ -496,6 +505,7 @@ final class Bridge {
 				throw BridgeFailure(message: "Request must be a JSON object", code: "invalid_request")
 			}
 			let id = (object["id"] as? String) ?? fallbackId
+			completionId = id
 
 			do {
 				let result = try handleRequest(object)
@@ -503,7 +513,7 @@ final class Bridge {
 					"id": id,
 					"ok": true,
 					"result": result,
-				], to: responseOutput)
+				], to: responseSocket)
 			} catch let failure as BridgeFailure {
 				send([
 					"id": id,
@@ -512,7 +522,7 @@ final class Bridge {
 						"message": failure.message,
 						"code": failure.code,
 					],
-				], to: responseOutput)
+				], to: responseSocket)
 			} catch {
 				send([
 					"id": id,
@@ -521,7 +531,7 @@ final class Bridge {
 						"message": error.localizedDescription,
 						"code": "internal_error",
 					],
-				], to: responseOutput)
+				], to: responseSocket)
 			}
 		} catch let failure as BridgeFailure {
 			send([
@@ -531,7 +541,7 @@ final class Bridge {
 					"message": failure.message,
 					"code": failure.code,
 				],
-			], to: responseOutput)
+			], to: responseSocket)
 		} catch {
 			send([
 				"id": fallbackId,
@@ -540,21 +550,48 @@ final class Bridge {
 					"message": error.localizedDescription,
 					"code": "internal_error",
 				],
-			], to: responseOutput)
+			], to: responseSocket)
 		}
 	}
 
-	private func send(_ payload: [String: Any], to responseOutput: FileHandle? = nil) {
+	private func send(_ payload: [String: Any], to responseSocket: Int32? = nil) {
 		guard JSONSerialization.isValidJSONObject(payload),
 			let data = try? JSONSerialization.data(withJSONObject: payload),
-			let line = String(data: data, encoding: .utf8)
+			let line = String(data: data, encoding: .utf8),
+			let out = (line + "\n").data(using: .utf8)
 		else {
 			return
 		}
 
-		if let out = (line + "\n").data(using: .utf8) {
-			(responseOutput ?? output).write(out)
+		guard let responseSocket else {
+			try? output.write(contentsOf: out)
+			return
 		}
+		out.withUnsafeBytes { raw in
+			guard let base = raw.baseAddress else { return }
+			var offset = 0
+			while offset < raw.count {
+				let sent = Darwin.send(responseSocket, base.advanced(by: offset), raw.count - offset, 0)
+				if sent <= 0 { return }
+				offset += sent
+			}
+		}
+	}
+
+	private func recordCompletedRequest(_ id: String) {
+		completedRequestLock.lock()
+		recentCompletedRequestIds.removeAll { $0 == id }
+		recentCompletedRequestIds.append(id)
+		if recentCompletedRequestIds.count > 32 {
+			recentCompletedRequestIds.removeFirst(recentCompletedRequestIds.count - 32)
+		}
+		completedRequestLock.unlock()
+	}
+
+	private func completedRequestIds() -> [String] {
+		completedRequestLock.lock()
+		defer { completedRequestLock.unlock() }
+		return recentCompletedRequestIds
 	}
 
 	private func handleRequest(_ request: [String: Any]) throws -> Any {
@@ -700,7 +737,13 @@ final class Bridge {
 				return true
 			}(),
 		]
+		#if arch(arm64)
 		let arch = "arm64"
+		#elseif arch(x86_64)
+		let arch = "x86_64"
+		#else
+		let arch = "unknown"
+		#endif
 		let parentPid = Int32(getppid())
 		let parentApp = NSRunningApplication(processIdentifier: parentPid)
 		let parentPath = processPath(pid: parentPid)
@@ -715,6 +758,7 @@ final class Bridge {
 			"arch": arch,
 			"accessibility": permissions["accessibility"] ?? false,
 			"screenRecording": permissions["screenRecording"] ?? false,
+			"recentCompletedRequestIds": completedRequestIds(),
 		]
 		if let parentPath {
 			output["parentPath"] = parentPath
@@ -735,17 +779,15 @@ final class Bridge {
 	/// two disagree, the preflight boolean is the one lying.
 	private func screenRecordingCapturable() -> Bool {
 		if #available(macOS 14.0, *) {
-			let semaphore = DispatchSemaphore(value: 0)
+			let sema = DispatchSemaphore(value: 0)
 			let capturable = Box<Bool>(false)
-			Task {
-				defer { semaphore.signal() }
-				if let shareable = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false) {
+			SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: false) { shareable, error in
+				if let shareable = shareable {
 					capturable.value = !shareable.displays.isEmpty
 				}
+				sema.signal()
 			}
-			if semaphore.wait(timeout: .now() + .seconds(3)) == .timedOut {
-				return false
-			}
+			guard sema.wait(timeout: .now() + .seconds(5)) == .success else { return false }
 			return capturable.value
 		}
 		if #available(macOS 10.15, *) {
@@ -869,7 +911,7 @@ final class Bridge {
 		pid > 0 && kill(pid, 0) == 0
 	}
 
-	private func listApps() -> [[String: Any]] {
+	private func listApps(cgEntries: [[String: Any]]? = nil) -> [[String: Any]] {
 		let frontmostPid = NSWorkspace.shared.frontmostApplication?.processIdentifier
 		let apps = NSWorkspace.shared.runningApplications.filter { app in
 			// Computer-use targets are windows, not Dock-visible applications. Some
@@ -897,7 +939,7 @@ final class Bridge {
 		// even when their windows are visible and AX-controllable. Add CGWindow
 		// owners as acquisition candidates so callers can still resolve by pid/title
 		// and then build the normal AX scene through listWindows(pid:).
-		for owner in cgWindowOwners() where owner.pid != getpid() && !seen.contains(owner.pid) && pidIsAlive(owner.pid) {
+		for owner in cgWindowOwners(entries: cgEntries) where owner.pid != getpid() && !seen.contains(owner.pid) && pidIsAlive(owner.pid) {
 			seen.insert(owner.pid)
 			output.append([
 				"appName": owner.name,
@@ -1105,24 +1147,36 @@ final class Bridge {
 		["pairing": ["confidence": pairing.confidence, "score": pairing.score], "sheetCount": sheetCount]
 	}
 
+	private func broadRootCandidateApps(entries: [[String: Any]]) -> [[String: Any]] {
+		cgBroadRootOwners(entries: entries).compactMap { owner in
+			guard owner.pid != getpid(), pidIsAlive(owner.pid) else { return nil }
+			var app: [String: Any] = ["appName": owner.name, "pid": Int(owner.pid)]
+			if let bundleId = NSRunningApplication(processIdentifier: owner.pid)?.bundleIdentifier {
+				app["bundleId"] = bundleId
+			}
+			return app
+		}
+	}
+
 	private func listRoots(pid: Int32?, title: String? = nil) throws -> [String: Any] {
 		let requestedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+		let entries = allCGWindowEntries()
+		let isBroadDiscovery = pid == nil && requestedTitle.isEmpty
 		let apps: [[String: Any]]
 		if let pid {
 			apps = [["pid": Int(pid)]]
-		} else if !requestedTitle.isEmpty,
-			let entries = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] {
+		} else if !requestedTitle.isEmpty {
 			let matchingPids = Set(entries.compactMap { entry -> Int32? in
 				let candidate = ((entry[kCGWindowName as String] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 				guard candidate == requestedTitle || candidate.contains(requestedTitle) else { return nil }
 				return (entry[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value
 			})
-			apps = listApps().filter { app in
+			apps = listApps(cgEntries: entries).filter { app in
 				guard let rawPid = app["pid"] as? Int else { return false }
 				return matchingPids.contains(Int32(rawPid))
 			}
 		} else {
-			apps = listApps()
+			apps = broadRootCandidateApps(entries: entries)
 		}
 		var roots: [[String: Any]] = []
 		for app in apps {
@@ -1130,14 +1184,15 @@ final class Bridge {
 			let appPid = Int32(rawPid)
 			let appName = app["appName"] as? String ?? processName(pid: appPid) ?? "Unknown App"
 			let bundleId = app["bundleId"] as? String
-			for var root in (try? listWindows(pid: appPid)) ?? [] {
+			for var root in (try? listWindows(pid: appPid, cgEntries: entries, messagingTimeout: isBroadDiscovery ? 0.25 : 1.0)) ?? [] {
 				root["pid"] = rawPid
 				root["appName"] = appName
 				if let bundleId { root["bundleId"] = bundleId }
 				roots.append(root)
 			}
-			let menuElements = openMenuElements(pid: appPid)
-			for (index, candidate) in cgPopupMenuCandidates(pid: appPid).enumerated() {
+			let popupCandidates = cgPopupMenuCandidates(pid: appPid, entries: entries)
+			let menuElements = popupCandidates.isEmpty ? [] : openMenuElements(pid: appPid, messagingTimeout: isBroadDiscovery ? 0.25 : 1.0)
+			for (index, candidate) in popupCandidates.enumerated() {
 				let menuElement = index < menuElements.count ? menuElements[index] : nil
 				let menuRef = menuElement.map { refStore.storeWindow($0) } ?? "cgmenu:\(candidate.windowId)"
 				var menu: [String: Any] = [
@@ -1168,12 +1223,12 @@ final class Bridge {
 		return ["roots": roots]
 	}
 
-	private func listWindows(pid: Int32) throws -> [[String: Any]] {
+	private func listWindows(pid: Int32, cgEntries: [[String: Any]]? = nil, messagingTimeout: Float = 1.0) throws -> [[String: Any]] {
 		ensureEnhancedAccessibility(pid: pid)
 		let appElement = AXUIElementCreateApplication(pid)
-		AXUIElementSetMessagingTimeout(appElement, 1.0)
-		let windows = axElementArray(appElement, attribute: kAXWindowsAttribute as CFString)
-		let candidates = cgWindowCandidates(pid: pid)
+		AXUIElementSetMessagingTimeout(appElement, messagingTimeout)
+		let windows = Array(axElementArray(appElement, attribute: kAXWindowsAttribute as CFString).prefix(128))
+		let candidates = cgWindowCandidates(pid: pid, entries: cgEntries)
 		let pairings = windowPairings(windows: windows, candidates: candidates)
 
 		var output: [[String: Any]] = []
@@ -1274,7 +1329,7 @@ final class Bridge {
 		let pid: Int32
 		if let windowId, let ownerPid = pidForWindowId(windowId) {
 			pid = ownerPid
-		} else if let windowRef, let element = refStore.element(for: windowRef), let owner = pidForElement(element) {
+		} else if let requestedRoot, let owner = pidForElement(requestedRoot) {
 			pid = owner
 		} else {
 			throw BridgeFailure(message: "Root is not owned by a running app", code: "root_not_found")
@@ -1880,6 +1935,7 @@ final class Bridge {
 		func animateCursor(at point: CGPoint) {
 			guard supportsAgentCursor,
 				(request["cursorOverlay"] as? Bool ?? true),
+				delivery == "pid",
 				policy != "ax_only",
 				["press", "click", "moveMouse", "scroll", "drag"].contains(action)
 			else { return }
@@ -2257,6 +2313,7 @@ final class Bridge {
 		let text = optionalStringArg(request, "text")?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 		let expectedValue = optionalStringArg(request, "value")?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 		let waitForGone = boolArg(request, "gone") ?? false
+		let scopeExact = boolArg(request, "scopeExact") ?? false
 		let timeoutMs = max(100, min(60_000, optionalIntArg(request, "timeoutMs") ?? 10_000))
 		let deadline = Date().addingTimeInterval(Double(timeoutMs) / 1000.0)
 		guard role?.isEmpty == false || text?.isEmpty == false || expectedValue?.isEmpty == false else {
@@ -2264,6 +2321,15 @@ final class Bridge {
 		}
 		guard let window = windowElement(pid: pid, windowId: windowId, windowRef: windowRef) else {
 			return ["found": false, "reason": "window_not_found"]
+		}
+		let rootElement: AXUIElement
+		if let scopeRef = optionalStringArg(request, "scopeRef") {
+			guard let scoped = refStore.element(for: scopeRef), isElement(scoped, descendantOf: window) else {
+				throw BridgeFailure(message: "Condition scope ref is stale or outside the target root", code: "element_ref_invalid")
+			}
+			rootElement = scoped
+		} else {
+			rootElement = window
 		}
 		_ = ensureRootObserver(pid: pid)
 
@@ -2289,7 +2355,8 @@ final class Bridge {
 		var lastCount = 0
 		repeat {
 			let changeGeneration = rootChangeGeneration(pid: pid)
-			let descendants = collectDescendantsWithContext(startingAt: window, maxDepth: 12, maxNodes: 2000)
+			let collected = collectDescendantsWithContext(startingAt: rootElement, maxDepth: 12, maxNodes: 2000)
+			let descendants = scopeExact ? Array(collected.prefix(1)) : collected
 			lastCount = descendants.count
 			if let match = descendants.first(where: { matches($0.element) }) {
 				if waitForGone {
@@ -2404,7 +2471,7 @@ final class Bridge {
 
 		let appElement = AXUIElementCreateApplication(pid)
 		AXUIElementSetMessagingTimeout(appElement, 1.0)
-		let windows = axElementArray(appElement, attribute: kAXWindowsAttribute as CFString)
+		let windows = Array(axElementArray(appElement, attribute: kAXWindowsAttribute as CFString).prefix(128))
 		guard !windows.isEmpty else { return nil }
 		guard let windowId else {
 			return windows.first
@@ -2814,10 +2881,12 @@ final class Bridge {
 		return CGRect(origin: origin, size: size)
 	}
 
-	private func cgWindowOwners() -> [CGWindowOwnerSummary] {
-		guard let entries = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] else {
-			return []
-		}
+	private func allCGWindowEntries() -> [[String: Any]] {
+		(CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]) ?? []
+	}
+
+	private func cgWindowOwners(entries suppliedEntries: [[String: Any]]? = nil) -> [CGWindowOwnerSummary] {
+		let entries = suppliedEntries ?? allCGWindowEntries()
 		var seen = Set<Int32>()
 		var owners: [CGWindowOwnerSummary] = []
 		for entry in entries {
@@ -2842,11 +2911,8 @@ final class Bridge {
 		windowInfo(windowId: windowId)?.pid
 	}
 
-	private func cgWindowCandidates(pid: Int32) -> [CGWindowCandidate] {
-		guard let entries = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] else {
-			return []
-		}
-
+	private func cgWindowCandidates(pid: Int32, entries suppliedEntries: [[String: Any]]? = nil) -> [CGWindowCandidate] {
+		let entries = suppliedEntries ?? allCGWindowEntries()
 		var candidates: [CGWindowCandidate] = []
 		for (zOrder, entry) in entries.enumerated() {
 			guard let ownerPid = (entry[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
@@ -2878,14 +2944,35 @@ final class Bridge {
 					zOrder: zOrder
 				)
 			)
+			if candidates.count == 128 { break }
 		}
 		return candidates
 	}
 
-	private func cgPopupMenuCandidates(pid: Int32?) -> [CGWindowCandidate] {
-		guard let entries = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] else {
-			return []
+	private func cgBroadRootOwners(entries: [[String: Any]]) -> [CGWindowOwnerSummary] {
+		let popupLevel = Int(CGWindowLevelForKey(.popUpMenuWindow))
+		var seen = Set<Int32>()
+		return entries.compactMap { entry -> CGWindowOwnerSummary? in
+			let layer = (entry[kCGWindowLayer as String] as? NSNumber)?.intValue ?? 0
+			guard layer == 0 || layer == popupLevel,
+				let pid = (entry[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value
+			else { return nil }
+			if layer == popupLevel {
+				guard (entry[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue == true else { return nil }
+			} else {
+				guard let boundsDict = entry[kCGWindowBounds as String] as? [String: Any],
+					let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary),
+					bounds.width >= 100,
+					bounds.height >= 80
+				else { return nil }
+			}
+			guard seen.insert(pid).inserted else { return nil }
+			let name = (entry[kCGWindowOwnerName as String] as? String) ?? processName(pid: pid) ?? "Unknown App"
+			return CGWindowOwnerSummary(pid: pid, name: name)
 		}
+	}
+
+	private func cgPopupMenuCandidates(pid: Int32?, entries: [[String: Any]]) -> [CGWindowCandidate] {
 		let popupLevel = Int(CGWindowLevelForKey(.popUpMenuWindow))
 		var candidates: [CGWindowCandidate] = []
 		for (zOrder, entry) in entries.enumerated() {
@@ -2898,14 +2985,17 @@ final class Bridge {
 				let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary)
 			else { continue }
 			let title = (entry[kCGWindowName as String] as? String) ?? ""
-			let isOnscreen = (entry[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue ?? true
+			let isOnscreen = (entry[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue ?? false
+			guard isOnscreen else { continue }
 			candidates.append(CGWindowCandidate(windowId: windowNumber, title: title, bounds: bounds, isOnscreen: isOnscreen, layer: layer, zOrder: zOrder))
+			if candidates.count == 128 { break }
 		}
 		return candidates
 	}
 
-	private func openMenuElements(pid: Int32) -> [AXUIElement] {
+	private func openMenuElements(pid: Int32, messagingTimeout: Float = 1.0) -> [AXUIElement] {
 		let app = AXUIElementCreateApplication(pid)
+		AXUIElementSetMessagingTimeout(app, messagingTimeout)
 		let descendants = collectDescendants(startingAt: app, maxDepth: 6)
 		var menus = descendants.filter { (stringAttribute($0, attribute: kAXRoleAttribute as CFString) ?? "") == "AXMenu" }
 		if menus.isEmpty,
@@ -3051,6 +3141,10 @@ final class Bridge {
 
 					let filter = SCContentFilter(desktopIndependentWindow: window)
 					let config = SCStreamConfiguration()
+					// Avoid ScreenCaptureKit's default 1920x1080 canvas for window captures.
+					let scale = displayScaleFactor(for: window.frame)
+					config.width = max(1, Int((window.frame.width * scale).rounded()))
+					config.height = max(1, Int((window.frame.height * scale).rounded()))
 					config.showsCursor = false
 					config.ignoreShadowsSingleWindow = true
 
@@ -3162,10 +3256,20 @@ final class Bridge {
 	}
 
 	private func windowInfo(windowId: UInt32) -> (pid: Int32, bounds: CGRect)? {
-		guard let entries = CGWindowListCopyWindowInfo([.optionIncludingWindow], CGWindowID(windowId)) as? [[String: Any]],
-			let first = entries.first,
-			let pid = (first[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
-			let boundsDict = first[kCGWindowBounds as String] as? [String: Any],
+		func matchingEntry(_ entries: [[String: Any]]?) -> [String: Any]? {
+			entries?.first {
+				($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == windowId
+			}
+		}
+
+		let requestedIds = [NSNumber(value: windowId)] as CFArray
+		let targetedEntries = CGWindowListCreateDescriptionFromArray(requestedIds) as? [[String: Any]]
+		let entry = matchingEntry(targetedEntries) ?? matchingEntry(
+			CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]]
+		)
+		guard let entry,
+			let pid = (entry[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
+			let boundsDict = entry[kCGWindowBounds as String] as? [String: Any],
 			let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary)
 		else {
 			return nil

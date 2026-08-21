@@ -9,7 +9,8 @@ const MAX_ARTIFACT_BYTES = 256 * 1024 * 1024;
 const MAX_SCREENSHOT_BYTES = 16 * 1024 * 1024;
 const directoryTails = new Map<string, Promise<unknown>>();
 
-export function screenshotDirectory(_platform: NodeJS.Platform = process.platform): string {
+export function screenshotDirectory(platform: NodeJS.Platform = process.platform): string {
+	if (platform === "win32") return path.join(process.env.LOCALAPPDATA ?? os.tmpdir(), "bcu", "shots");
 	return path.join(os.homedir(), "Library", "Caches", "bcu", "shots");
 }
 
@@ -95,11 +96,11 @@ export async function materializeScreenshot<Details>(
 	const artifactDirectory = path.resolve(directory);
 	return await serializeDirectory(artifactDirectory, async () => {
 		await mkdir(artifactDirectory, { recursive: true, mode: 0o700 });
-		await chmod(artifactDirectory, 0o700);
+		if (process.platform !== "win32") await chmod(artifactDirectory, 0o700);
 		const extension = image.mimeType === "image/png" ? "png" : "jpg";
 		const filePath = path.join(artifactDirectory, `${capture.stateId}.${extension}`);
 		await writeFile(filePath, bytes, { mode: 0o600 });
-		await chmod(filePath, 0o600);
+		if (process.platform !== "win32") await chmod(filePath, 0o600);
 		await prune(artifactDirectory, filePath);
 		const screenshot: ScreenshotArtifact = {
 			path: filePath,

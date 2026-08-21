@@ -12,7 +12,7 @@ export const ERROR_DEFINITIONS = {
 	broker_unavailable: { exitCode: 10, recovery: "Run 'bcu doctor'. If a stale process remains, run 'bcu stop' and retry." },
 	helper_unavailable: { exitCode: 11, recovery: "Run 'bcu doctor', repair the helper it reports, then retry." },
 	browser_unavailable: { exitCode: 12, recovery: "Install the requested browser or run 'bcu browser launch --browser helium'." },
-	unsupported_platform: { exitCode: 13, recovery: "Use bcu on Apple Silicon macOS 14 or newer." },
+	unsupported_platform: { exitCode: 13, recovery: "Use bcu on a supported macOS or Windows interactive desktop session." },
 	state_too_large: { exitCode: 14, recovery: "Observe a smaller root or narrow the UI before retrying." },
 	internal_error: { exitCode: 1, recovery: "Run 'bcu doctor' and retry. If it repeats, report the full error." },
 } as const;

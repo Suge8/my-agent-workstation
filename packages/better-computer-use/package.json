@@ -1,57 +1,69 @@
 {
-  "name": "better-computer-use",
-  "version": "0.1.0",
-  "description": "Standalone Apple Silicon macOS CLI, Broker, and desktop-control helper.",
-  "type": "module",
-  "keywords": ["computer-use", "cli", "broker", "macos", "arm64", "desktop-automation"],
-  "license": "MIT",
-  "author": "Zane Chee (upstream author)",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/injaneity/pi-computer-use.git"
-  },
-  "homepage": "https://github.com/injaneity/pi-computer-use#readme",
-  "upstream": "https://github.com/injaneity/pi-computer-use",
-  "engines": {
-    "node": ">=20.6.0"
-  },
-  "os": ["darwin"],
-  "cpu": ["arm64"],
-  "files": [
-    "dist",
-    "src",
-    "native/macos",
-    "scripts/build-native.mjs",
-    "scripts/setup-helper.mjs",
-    "prebuilt/macos/arm64/bridge",
-    "docs/usage.md",
-    "README.md",
-    "LICENSE"
-  ],
-  "bin": {
-    "bcu": "dist/bcu.mjs"
-  },
-  "scripts": {
-    "postinstall": "node scripts/setup-helper.mjs --postinstall",
-    "prepack": "npm run build",
-    "build": "esbuild src/cli.ts --bundle --platform=node --format=esm --banner:js=\"#!/usr/bin/env node\" --outfile=dist/bcu.mjs",
-    "typecheck": "tsc -p tsconfig.json",
-    "test:schema": "node scripts/check-tool-schemas.mjs",
-    "test:bundle": "node scripts/check-bundled-runtime.mjs",
-    "test:artifacts": "node scripts/check-artifacts.mjs",
-    "test:cli-errors": "node scripts/check-cli-errors.mjs",
-    "test:package": "node scripts/check-package.mjs",
-    "test:lifecycle": "node scripts/check-session-lifecycle.mjs",
-    "test:runtime": "node scripts/check-runtime-concurrency.mjs",
-    "test:broker": "node scripts/check-broker-lifecycle.mjs",
-    "test:helper-transport": "node scripts/check-macos-helper-transport.mjs",
-    "test:event-readiness": "node scripts/check-event-readiness.mjs",
-    "test": "npm run typecheck && npm run test:schema && npm run test:bundle && npm run test:artifacts && npm run test:cli-errors && npm run test:package && npm run test:lifecycle && npm run test:runtime && npm run test:broker && npm run test:helper-transport && npm run test:event-readiness",
-    "build:native": "node scripts/build-native.mjs"
-  },
-  "devDependencies": {
-    "@types/node": "^25.6.0",
-    "esbuild": "^0.28.1",
-    "typescript": "^6.0.3"
-  }
+	"name": "better-computer-use",
+	"version": "0.1.0",
+	"description": "Standalone Apple Silicon macOS CLI, Broker, and desktop-control helper.",
+	"type": "module",
+	"keywords": [
+		"computer-use",
+		"cli",
+		"broker",
+		"macos",
+		"arm64",
+		"desktop-automation"
+	],
+	"license": "MIT",
+	"author": "Zane Chee (upstream author)",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/injaneity/pi-computer-use.git"
+	},
+	"homepage": "https://github.com/injaneity/pi-computer-use#readme",
+	"upstream": "https://github.com/injaneity/pi-computer-use",
+	"engines": {
+		"node": ">=20.6.0"
+	},
+	"os": [
+		"darwin"
+	],
+	"cpu": [
+		"arm64"
+	],
+	"files": [
+		"dist",
+		"src",
+		"native/macos",
+		"scripts/build-native.mjs",
+		"scripts/setup-helper.mjs",
+		"prebuilt/macos/arm64/bridge",
+		"docs/usage.md",
+		"README.md",
+		"LICENSE"
+	],
+	"bin": {
+		"bcu": "dist/bcu.mjs"
+	},
+	"scripts": {
+		"postinstall": "node scripts/setup-helper.mjs --postinstall",
+		"prepack": "npm run build",
+		"build": "esbuild src/cli.ts --bundle --platform=node --format=esm --banner:js=\"#!/usr/bin/env node\" --outfile=dist/bcu.mjs",
+		"typecheck": "tsc -p tsconfig.json",
+		"test:schema": "node scripts/check-tool-schemas.mjs",
+		"test:bundle": "node scripts/check-bundled-runtime.mjs",
+		"test:artifacts": "node scripts/check-artifacts.mjs",
+		"test:cli-errors": "node scripts/check-cli-errors.mjs",
+		"test:package": "node scripts/check-package.mjs",
+		"test:lifecycle": "node scripts/check-session-lifecycle.mjs",
+		"test:runtime": "node scripts/check-runtime-concurrency.mjs",
+		"test:broker": "node scripts/check-broker-lifecycle.mjs",
+		"test:helper-transport": "node scripts/check-macos-helper-transport.mjs",
+		"test:event-readiness": "node scripts/check-event-readiness.mjs",
+		"test": "npm run typecheck && npm run test:schema && npm run test:bundle && npm run test:artifacts && npm run test:cli-errors && npm run test:package && npm run test:lifecycle && npm run test:runtime && npm run test:broker && npm run test:helper-transport && npm run test:event-readiness && npm run test:macos-path",
+		"build:native": "node scripts/build-native.mjs",
+		"test:macos-path": "node scripts/check-macos-helper-path.mjs"
+	},
+	"devDependencies": {
+		"@types/node": "^25.6.0",
+		"esbuild": "^0.28.1",
+		"typescript": "^6.0.3"
+	}
 }

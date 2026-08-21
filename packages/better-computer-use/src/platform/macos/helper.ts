@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
-import { access, mkdir } from "node:fs/promises";
+import { access, mkdir, realpath } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -8,6 +8,7 @@ import { setupHelperScriptPath } from "../../package-root.ts";
 import { waitForPathReady } from "../../readiness.ts";
 import { toBoolean, toFiniteNumber, toOptionalString } from "../coerce.ts";
 import type { PlatformDiagnostics } from "../types.ts";
+import { resolveMacosHelperAppPath } from "./helper-path.mjs";
 
 const COMMAND_TIMEOUT_MS = 15_000;
 export const HELPER_PROTOCOL_VERSION = 6;
@@ -22,7 +23,7 @@ interface PendingResponse {
 }
 
 export const HELPER_BUNDLE_ID = "dev.myagentworkstation.bcu";
-export const HELPER_APP_PATH = process.env.BCU_HELPER_APP_PATH ?? "/Applications/bcu.app";
+export const HELPER_APP_PATH = resolveMacosHelperAppPath();
 export const HELPER_APP_EXECUTABLE_PATH = path.join(HELPER_APP_PATH, "Contents", "MacOS", "bridge");
 const DEFAULT_HELPER_SOCKET_PATH = path.join(os.homedir(), "Library", "Caches", "bcu", "bridge.sock");
 export const HELPER_SOCKET_PATH = process.env.BCU_SOCKET_PATH ?? DEFAULT_HELPER_SOCKET_PATH;
@@ -56,6 +57,15 @@ async function isExecutable(filePath: string): Promise<boolean> {
 	} catch {
 		return false;
 	}
+}
+
+async function isResolvedHelperExecutable(filePath?: string): Promise<boolean> {
+	if (!filePath) return true;
+	const [actualPath, expectedPath] = await Promise.all([
+		realpath(filePath).catch(() => path.resolve(filePath)),
+		realpath(HELPER_APP_EXECUTABLE_PATH).catch(() => path.resolve(HELPER_APP_EXECUTABLE_PATH)),
+	]);
+	return actualPath === expectedPath;
 }
 
 export async function runProcess(
@@ -150,11 +160,12 @@ export class MacosHelperClient {
 
 	async ensureInstalled(signal?: AbortSignal): Promise<void> {
 		if (usingExternalHelperSocket || this.helperInstallChecked) return;
-		// Runtime setup repairs missing or replaced binaries while preserving an
-		// intact older ad-hoc helper for the protocol check to arbitrate.
+		// Runtime setup repairs missing or replaced binaries once per session while
+		// preserving an intact older ad-hoc helper for the protocol check to arbitrate.
 		const setupOutput = await runProcess(process.execPath, [setupHelperScriptPath(), "--runtime"], HELPER_SETUP_TIMEOUT_MS, signal, {
 			...process.env,
 			ELECTRON_RUN_AS_NODE: "1",
+			BUN_BE_BUN: "1",
 		});
 		if (setupOutput.stderr) process.stderr.write(setupOutput.stderr);
 		if (!(await isExecutable(HELPER_APP_EXECUTABLE_PATH))) {
@@ -166,7 +177,9 @@ export class MacosHelperClient {
 	async launchDaemon(signal?: AbortSignal): Promise<void> {
 		if (usingExternalHelperSocket) throw new HelperTransportError(`External helper socket is unavailable at ${HELPER_SOCKET_PATH}.`);
 		await mkdir(path.dirname(HELPER_SOCKET_PATH), { recursive: true });
-		await runProcess("open", ["-n", "-g", "-b", HELPER_BUNDLE_ID, "--args", "serve", "--socket", HELPER_SOCKET_PATH], COMMAND_TIMEOUT_MS, signal);
+		// Open the resolved bundle directly so a legacy system-wide copy with the
+		// same bundle id cannot win LaunchServices resolution.
+		await runProcess("open", ["-n", "-g", HELPER_APP_PATH, "--args", "serve", "--socket", HELPER_SOCKET_PATH], COMMAND_TIMEOUT_MS, signal);
 	}
 
 	private async connection(signal?: AbortSignal): Promise<net.Socket> {
@@ -371,17 +384,21 @@ export class MacosHelperClient {
 
 	async ensureProtocol(signal?: AbortSignal): Promise<PlatformDiagnostics> {
 		let diagnostics = await this.diagnosticsCommand(signal);
-		if (diagnostics.protocolVersion === HELPER_PROTOCOL_VERSION) return diagnostics;
+		const executableMatches = await isResolvedHelperExecutable(diagnostics.executablePath);
+		if (diagnostics.protocolVersion === HELPER_PROTOCOL_VERSION && executableMatches) return diagnostics;
 
 		// The helper daemon outlives a bcu process, so restarting the CLI alone does not
 		// replace a daemon that is still serving the previous installed binary.
 		// Stop it through the backwards-compatible command channel and relaunch
-		// the app that ensureInstalled() has just synced to /Applications.
+		// the exact app bundle that ensureInstalled() resolved.
 		await this.restart(signal);
 		diagnostics = await this.diagnosticsCommand(signal);
-		if (diagnostics.protocolVersion !== HELPER_PROTOCOL_VERSION) {
+		const relaunchedExecutableMatches = await isResolvedHelperExecutable(diagnostics.executablePath);
+		if (diagnostics.protocolVersion !== HELPER_PROTOCOL_VERSION || !relaunchedExecutableMatches) {
 			this.daemonAvailable = false;
-			throw new Error(`bcu helper protocol mismatch after relaunch: expected ${HELPER_PROTOCOL_VERSION}, got ${diagnostics.protocolVersion}. Reinstall or rebuild the helper app at ${HELPER_APP_PATH}.`);
+			throw new Error(
+				`bcu helper mismatch after relaunch: expected protocol ${HELPER_PROTOCOL_VERSION} and executable ${HELPER_APP_EXECUTABLE_PATH}; got protocol ${diagnostics.protocolVersion} and executable ${diagnostics.executablePath ?? "unknown"}. Reinstall or rebuild the helper app at ${HELPER_APP_PATH}.`,
+			);
 		}
 		return diagnostics;
 	}

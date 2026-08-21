@@ -369,7 +369,12 @@ async function runDoctor(json: boolean): Promise<void> {
 }
 
 async function runSetup(json: boolean): Promise<void> {
-	if (process.platform !== "darwin" || !process.stdin.isTTY || !process.stderr.isTTY) {
+	if (process.platform === "win32") {
+		const result = await requestBroker<Record<string, unknown>>("setup", { phase: "complete" });
+		writeResult(result, json, "setup: ready");
+		return;
+	}
+	if (process.platform === "darwin" && (!process.stdin.isTTY || !process.stderr.isTTY)) {
 		throw new BcuError("permission_missing", "bcu setup requires an interactive terminal so you can grant macOS permissions.");
 	}
 	const registered = await requestBroker<Record<string, unknown>>("setup", { phase: "register" });

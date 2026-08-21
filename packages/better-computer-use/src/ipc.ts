@@ -1,14 +1,22 @@
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 
 export const BROKER_PROTOCOL_VERSION = 1;
 
-export function defaultBrokerSocketPath(_platform: NodeJS.Platform = process.platform, homeDirectory = os.homedir()): string {
+export function defaultBrokerSocketPath(
+	platform: NodeJS.Platform = process.platform,
+	homeDirectory = os.homedir(),
+): string {
+	if (platform === "win32") {
+		const userKey = createHash("sha256").update(homeDirectory.toLowerCase()).digest("hex").slice(0, 16);
+		return `\\\\.\\pipe\\bcu-broker-${userKey}`;
+	}
 	return path.join(homeDirectory, "Library", "Caches", "bcu", "broker.sock");
 }
 
-export function brokerSocketUsesFilesystem(_platform: NodeJS.Platform = process.platform): true {
-	return true;
+export function brokerSocketUsesFilesystem(platform: NodeJS.Platform = process.platform): boolean {
+	return platform !== "win32";
 }
 
 export const BROKER_SOCKET_PATH = process.env.BCU_BROKER_SOCKET_PATH ?? defaultBrokerSocketPath();

@@ -1,7 +1,7 @@
 import type { LookResponse } from "../outline.ts";
 import type { PermissionStatus } from "../permissions.ts";
 
-export type PlatformName = "macos";
+export type PlatformName = "macos" | "windows" | "linux";
 export type NativeInputDelivery = "hid" | "pid";
 export type ActOutcome = "worked" | "didnt" | "unknown";
 /**
@@ -94,7 +94,7 @@ export interface PlatformFocusWindowResult {
 
 export interface HelperActPerformed {
 	grounding?: "description" | "coordinates" | "keyboard-events";
-	/** `ax` means the macOS accessibility API. */
+	/** `ax` means the platform accessibility API (AX on macOS, UIA on Windows). */
 	delivery?: "ax" | NativeInputDelivery;
 	refound?: boolean;
 	/** Free-form diagnostic naming the platform's delta mechanism. */
@@ -143,7 +143,6 @@ export interface PlatformObserveRequest {
 	includeImage?: boolean;
 }
 
-type PlatformActAction = "press" | "click" | "setText" | "typeText" | "keypress" | "scroll" | "drag" | "moveMouse";
 export type PlatformActTarget = { ref: string } | { x: number; y: number } | { focus: PlatformPoint };
 type PlatformDeliveryPolicy = "ax_only" | "background" | "default" | "foreground";
 type PlatformMouseButton = "left" | "right" | "middle";
@@ -184,9 +183,12 @@ export interface PlatformReadTextResponse {
 }
 
 export interface PlatformWaitForRequest extends PlatformTarget {
+	lookId?: string;
 	text?: string;
 	role?: string;
 	value?: string;
+	scopeRef?: string;
+	scopeExact?: boolean;
 	gone: boolean;
 	timeoutMs: number;
 }
