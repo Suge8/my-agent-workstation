@@ -8,15 +8,7 @@
 
 ## 开始
 
-首个 Release 发布前，请从检出目录测试：
-
-```bash
-git clone https://github.com/Suge8/my-agent-workstation.git
-cd my-agent-workstation
-./setup
-```
-
-发布后，稳定入口将只下载最新 Release：
+运行稳定安装入口；它只下载最新 Release：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Suge8/my-agent-workstation/main/install.sh | bash

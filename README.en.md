@@ -8,15 +8,7 @@ Supports **Apple Silicon, macOS 14+, and Zsh only**.
 
 ## Start
 
-Before the first Release, test from a checkout:
-
-```bash
-git clone https://github.com/Suge8/my-agent-workstation.git
-cd my-agent-workstation
-./setup
-```
-
-After release, the stable bootstrap will download only the latest Release:
+Run the stable bootstrap; it downloads only the latest Release:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Suge8/my-agent-workstation/main/install.sh | bash

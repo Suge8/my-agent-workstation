@@ -11,6 +11,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+      - name: Prepare Pi test host
+        run: |
+          ref=$(npm view @earendil-works/pi-coding-agent gitHead)
+          git init -q "$RUNNER_TEMP/pi"
+          git -C "$RUNNER_TEMP/pi" remote add origin https://github.com/earendil-works/pi.git
+          git -C "$RUNNER_TEMP/pi" fetch --depth=1 origin "$ref"
+          git -C "$RUNNER_TEMP/pi" checkout --detach FETCH_HEAD
+          (cd "$RUNNER_TEMP/pi" && npm install --ignore-scripts --no-package-lock && npm run hydrate:model-data)
+          echo "PI_PACKAGES_DIR=$RUNNER_TEMP/pi/packages" >> "$GITHUB_ENV"
       - run: brew install shellcheck
       - run: bun run check:shell
       - run: bun run test
