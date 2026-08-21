@@ -45,11 +45,18 @@ export function buildReviewPrompt(template: string, input: ReviewPromptInput): P
 		`${input.language === "en" ? "Session record" : "会话记录"}${sep}\n<session_evidence>\n${evidence}\n</session_evidence>`,
 		reviewReminder(input.language),
 	);
-	return promptLayers(template, parts.filter((part) => part !== "").join("\n\n"));
+	return promptLayers(
+		template,
+		parts.filter((part) => part !== "").join("\n\n"),
+		input.language,
+	);
 }
 
-function promptLayers(system: string, user: string): PromptLayers {
-	if (!system.trim()) throw new Error("FireReview system prompt 为空");
+function promptLayers(system: string, user: string, language: Language): PromptLayers {
+	if (!system.trim())
+		throw new Error(
+			language === "en" ? "FireReview system prompt is empty" : "FireReview system prompt 为空",
+		);
 	return { system, user };
 }
 
@@ -108,7 +115,7 @@ export function buildAdvisorPrompt(template: string, input: AdvisorPromptInput):
 			? "Now arbitrate under the system prompt and strictly follow its output contract."
 			: "现在按 system prompt 的规则完成仲裁，并严格遵守其输出契约。",
 	);
-	return promptLayers(template, parts.join("\n\n"));
+	return promptLayers(template, parts.join("\n\n"), input.language);
 }
 
 export interface FixFeedbackInput {

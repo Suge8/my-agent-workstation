@@ -410,6 +410,14 @@ describe("prompt assembly", () => {
 			history: [],
 			round: 1,
 		})).toThrow("system prompt 为空");
+		expect(() => buildReviewPrompt("", {
+			language: "en",
+			scope: "s",
+			focus: "",
+			evidence: "e",
+			history: [],
+			round: 1,
+		})).toThrow("FireReview system prompt is empty");
 		expect(() => readPrompt("missing" as never, "zh")).toThrow();
 	});
 
