@@ -27,18 +27,32 @@ export interface ReviewPromptInput {
 	round: number;
 }
 
-export function buildReviewPrompt(template: string, input: ReviewPromptInput): string {
+export interface PromptLayers {
+	system: string;
+	user: string;
+}
+
+/** 审查政策走 system 层；需求与历史留在 user 层，不能反向改写审查契约。 */
+export function buildReviewPrompt(template: string, input: ReviewPromptInput): PromptLayers {
 	const sep = input.language === "en" ? ":" : "：";
 	const parts = [
-		template,
 		`${input.language === "en" ? "Review target" : "审查对象"}${sep}\n${input.scope}`,
 	];
 	if (input.focus)
 		parts.push(`${input.language === "en" ? "Focus" : "关注点"}${sep}\n${input.focus}`);
 	const prior = priorRoundsSection(input.history, input.round, input.language);
 	if (prior) parts.push(prior);
-	parts.push(`${input.language === "en" ? "Session evidence" : "会话证据"}${sep}\n${input.evidence}`);
-	return parts.filter((part) => part !== "").join("\n\n");
+	parts.push(
+		`${input.language === "en" ? "Session record" : "会话记录"}${sep}\n<session_evidence>\n${input.evidence}\n</session_evidence>`,
+		reviewReminder(input.language),
+	);
+	return { system: template, user: parts.filter((part) => part !== "").join("\n\n") };
+}
+
+function reviewReminder(language: Language) {
+	return language === "en"
+		? "Now complete the review under the system prompt and strictly follow its output contract."
+		: "现在按 system prompt 的审查规则完成审查，并严格遵守其输出契约。";
 }
 
 /** 往轮 FAIL 发现清单（两相收敛的闭环输入）：第 2 轮起注入。 */
@@ -75,9 +89,9 @@ export interface AdvisorPromptInput {
 	round: number;
 }
 
-export function buildAdvisorPrompt(template: string, input: AdvisorPromptInput): string {
+export function buildAdvisorPrompt(template: string, input: AdvisorPromptInput): PromptLayers {
 	const sep = input.language === "en" ? ":" : "：";
-	const parts = [template];
+	const parts: string[] = [];
 	if (input.focus)
 		parts.push(`${input.language === "en" ? "Review focus" : "审查关注点"}${sep}\n${input.focus}`);
 	parts.push(
@@ -85,7 +99,12 @@ export function buildAdvisorPrompt(template: string, input: AdvisorPromptInput):
 	);
 	const prior = priorRoundsSection(input.history, input.round, input.language);
 	if (prior) parts.push(`${input.language === "en" ? "Prior FAIL history" : "往轮 FAIL 历史"}${sep}\n${prior}`);
-	return parts.join("\n\n");
+	parts.push(
+		input.language === "en"
+			? "Now arbitrate under the system prompt and strictly follow its output contract."
+			: "现在按 system prompt 的规则完成仲裁，并严格遵守其输出契约。",
+	);
+	return { system: template, user: parts.join("\n\n") };
 }
 
 export interface FixFeedbackInput {

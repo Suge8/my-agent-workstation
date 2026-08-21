@@ -3,13 +3,14 @@
  * 防止审查循环无限拉锯。子进程故障不伪装成仲裁结论，由外层收口为 Review Unavailable。
  */
 import type { Language } from "../config.js";
+import type { PromptLayers } from "./prompt.js";
 import type { AdvisorResult, AdvisorVerdict } from "./state.js";
 import { runPiProcess } from "./process.js";
 import type { ReviewModelConfig } from "./reviewer.js";
 
 export interface RunAdvisorOptions {
 	config: ReviewModelConfig;
-	prompt: string;
+	prompt: PromptLayers;
 	cwd: string;
 	language: Language;
 	signal?: AbortSignal;
@@ -29,11 +30,17 @@ export async function runAdvisor(options: RunAdvisorOptions): Promise<AdvisorRes
 	return parseAdvisorOutput(result.text, options.language);
 }
 
-export function advisorArgs(config: ReviewModelConfig, prompt: string) {
+export function advisorArgs(config: ReviewModelConfig, prompt: PromptLayers) {
 	return [
 		"--no-session",
 		"--mode",
 		"json",
+		"--system-prompt",
+		prompt.system.replaceAll("\0", ""),
+		"--no-extensions",
+		"--no-skills",
+		"--no-prompt-templates",
+		"--no-context-files",
 		"--model",
 		config.model,
 		"--thinking",
@@ -43,7 +50,7 @@ export function advisorArgs(config: ReviewModelConfig, prompt: string) {
 		"--exclude-tools",
 		"write,edit",
 		"-p",
-		prompt.replaceAll("\0", ""),
+		prompt.user.replaceAll("\0", ""),
 	];
 }
 

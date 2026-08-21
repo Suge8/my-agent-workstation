@@ -9,6 +9,7 @@
  * 真需物理隔离要上容器或只读挂载，不在当前方案内。
  */
 import type { Language } from "../config.js";
+import type { PromptLayers } from "./prompt.js";
 import type { ReviewerResult, ReviewerStatus } from "./state.js";
 import { type PiProcessEvent, runPiProcess } from "./process.js";
 
@@ -23,7 +24,7 @@ export interface ReviewModelConfig {
 export interface RunReviewerOptions {
 	index: number;
 	config: ReviewModelConfig;
-	prompt: string;
+	prompt: PromptLayers;
 	cwd: string;
 	language: Language;
 	signal?: AbortSignal;
@@ -61,11 +62,17 @@ export async function runReviewer(options: RunReviewerOptions): Promise<Reviewer
 	};
 }
 
-export function reviewerArgs(config: ReviewModelConfig, prompt: string) {
+export function reviewerArgs(config: ReviewModelConfig, prompt: PromptLayers) {
 	return [
 		"--no-session",
 		"--mode",
 		"json",
+		"--system-prompt",
+		prompt.system.replaceAll("\0", ""),
+		"--no-extensions",
+		"--no-skills",
+		"--no-prompt-templates",
+		"--no-context-files",
 		"--model",
 		config.model,
 		"--thinking",
@@ -75,7 +82,7 @@ export function reviewerArgs(config: ReviewModelConfig, prompt: string) {
 		"--exclude-tools",
 		"write,edit",
 		"-p",
-		prompt.replaceAll("\0", ""),
+		prompt.user.replaceAll("\0", ""),
 	];
 }
 

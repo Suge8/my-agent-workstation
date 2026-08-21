@@ -2,29 +2,37 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { cleanupFirecodeModules, loadFirecodeModule } from "./loader.ts";
 
 type ParseReview = typeof import("../review/reviewer.js").parseReviewOutput;
+type ReviewerArgs = typeof import("../review/reviewer.js").reviewerArgs;
 type Verdict = typeof import("../review/reviewer.js").verdictOf;
 type ParseAdvisor = typeof import("../review/advisor.js").parseAdvisorOutput;
+type AdvisorArgs = typeof import("../review/advisor.js").advisorArgs;
 type BuildEvidence = typeof import("../review/evidence.js").buildEvidence;
 
 let parseReview: ParseReview;
+let reviewerArgs: ReviewerArgs;
 let verdictOf: Verdict;
 let parseAdvisor: ParseAdvisor;
+let advisorArgs: AdvisorArgs;
 let buildEvidence: BuildEvidence;
 
 async function loadAll() {
 	const review = (await loadFirecodeModule("review/reviewer.js")) as {
 		parseReviewOutput: ParseReview;
+		reviewerArgs: ReviewerArgs;
 		verdictOf: Verdict;
 	};
 	const advisor = (await loadFirecodeModule("review/advisor.js")) as {
 		parseAdvisorOutput: ParseAdvisor;
+		advisorArgs: AdvisorArgs;
 	};
 	const evidence = (await loadFirecodeModule("review/evidence.js")) as {
 		buildEvidence: BuildEvidence;
 	};
 	parseReview = review.parseReviewOutput;
+	reviewerArgs = review.reviewerArgs;
 	verdictOf = review.verdictOf;
 	parseAdvisor = advisor.parseAdvisorOutput;
+	advisorArgs = advisor.advisorArgs;
 	buildEvidence = evidence.buildEvidence;
 }
 
@@ -43,6 +51,42 @@ function finding(issue: string) {
 afterEach(cleanupFirecodeModules);
 
 describe("PASS/FAIL output contract", () => {
+	test("review subprocess isolates its system policy from session evidence", async () => {
+		await loadAll();
+		const args = reviewerArgs(
+			{
+				model: "provider/model",
+				thinking: "high",
+				command: "pi",
+				tools: ["read", "bash"],
+				timeoutMs: 1_000,
+			},
+			{ system: "review policy", user: "session evidence" },
+		);
+		for (const argument of [
+			"--system-prompt",
+			"review policy",
+			"--no-extensions",
+			"--no-skills",
+			"--no-prompt-templates",
+			"--no-context-files",
+		]) expect(args).toContain(argument);
+		expect(args.at(-1)).toBe("session evidence");
+		const arbitration = advisorArgs(
+			{
+				model: "provider/advisor",
+				thinking: "high",
+				command: "pi",
+				tools: ["read", "bash"],
+				timeoutMs: 1_000,
+			},
+			{ system: "advisor policy", user: "findings" },
+		);
+		expect(arbitration).toContain("--system-prompt");
+		expect(arbitration).toContain("--no-context-files");
+		expect(arbitration.at(-1)).toBe("findings");
+	});
+
 	test("verdictOf tolerates markdown bold around the verdict", async () => {
 		await loadAll();
 		expect(verdictOf("PASS")).toBe("PASS");
@@ -177,7 +221,7 @@ describe("advisor verdict parsing", () => {
 				tools: [],
 				timeoutMs: 1_000,
 			},
-			prompt: "x",
+			prompt: { system: "policy", user: "input" },
 			cwd: process.cwd(),
 			language: "zh",
 		})).rejects.toThrow("顾问子进程不可用");
