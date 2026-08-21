@@ -52,5 +52,5 @@ description: 项目骨架与文档一致性体检：初始化、半途补缺、�
 
 - 内部文档（AGENTS.md、CONTEXT.md、docs/ 全部）：**中文**
 - 社区文件（CONTRIBUTING.md、SECURITY.md）：**英文**——受众是全球贡献者
-- README：**英文主体**，顶部语言切换链接指向 `README.zh-CN.md`（Vue/Ant Design 等主流做法；单文件双语会太长）
+- README：跟随项目目标用户与既有约定；多语言版本使用独立文件，并在顶部互相链接
 - CHANGELOG：跟随仓库现有格式（ship skill 负责维护）
