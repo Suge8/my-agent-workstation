@@ -297,6 +297,31 @@ describe("registerReview wiring", () => {
 		}
 	});
 
+	test("a missing control prompt settles as an infrastructure error", async () => {
+		const module = (await loadFirecodeModule("review/index.js", {
+			extraFiles: { "review/prompts/review.zh.md": "" },
+		})) as { registerReview: (pi: unknown) => void };
+		const checkpoint = (await loadFirecodeModule("review/checkpoint.js")) as {
+			readCheckpoint: (ctx: unknown) => { phase: string; history: { result: string; details: string }[] } | undefined;
+		};
+		const sessionManager = makeSessionManager();
+		const { pi, registered } = makePi(sessionManager);
+		module.registerReview(pi);
+		const ctx = makeCtx(sessionManager);
+		const command = registered.commands.get("fire-review") as {
+			handler: (args: string, ctx: unknown) => Promise<void>;
+		};
+		await command.handler("", ctx);
+		for (let wait = 0; wait < 80; wait += 1) {
+			if (checkpoint.readCheckpoint({ sessionManager })?.phase === "settled") break;
+			await new Promise((resolve) => setTimeout(resolve, 25));
+		}
+		const state = checkpoint.readCheckpoint({ sessionManager });
+		expect(state?.phase).toBe("settled");
+		expect(state?.history.at(-1)?.result).toBe("error");
+		expect(state?.history.at(-1)?.details).toContain("system prompt 为空");
+	}, 10_000);
+
 	test("releases Herdr occupancy when a review passes", async () => {
 		const verdict = "PASS\n验证命令 exit 0。\n证据：文件=a.ts；命令=bun test";
 		const { registerReview, readCheckpoint, script } = await loadReviewWithVerdict(verdict);

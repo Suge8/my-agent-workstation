@@ -448,11 +448,11 @@ async function advanceWhenIdle(
 		return;
 	}
 	if (state.phase === "reviewing") {
-		startAction(active, `review:${state.round}`, () => startReviewers(pi));
+		startAction(active, `review:${state.round}`, "reviewer", () => startReviewers(pi));
 		return;
 	}
 	if (state.phase === "needs_fix") {
-		startAction(active, `advisor:${state.round}`, () => consultAdvisor(pi));
+		startAction(active, `advisor:${state.round}`, "advisor", () => consultAdvisor(pi));
 		return;
 	}
 	if (state.phase === "summarizing") {
@@ -474,16 +474,29 @@ async function advanceWhenIdle(
 	if (state.repair.status === "completed") await dispatch(pi, { type: "ADVANCE" });
 }
 
-function startAction(active: Controller, key: string, run: () => Promise<void>): void {
+function startAction(
+	active: Controller,
+	key: string,
+	kind: "reviewer" | "advisor",
+	run: () => Promise<void>,
+): void {
 	if (active.runningAction === key) return;
 	active.runningAction = key;
 	active.actionController = new AbortController();
-	const action = run().finally(() => {
-		if (active.actionPromise !== action) return;
-		active.actionPromise = undefined;
-		active.actionController = undefined;
-		active.runningAction = undefined;
-	});
+	const action = run()
+		.catch(async (error) => {
+			if (controller !== active || active.actionController?.signal.aborted) return;
+			await dispatch(active.pi, {
+				type: "INFRASTRUCTURE_ERROR",
+				details: processErrorText(kind, active.config.language, error),
+			});
+		})
+		.finally(() => {
+			if (active.actionPromise !== action) return;
+			active.actionPromise = undefined;
+			active.actionController = undefined;
+			active.runningAction = undefined;
+		});
 	active.actionPromise = action;
 }
 
