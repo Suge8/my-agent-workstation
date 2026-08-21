@@ -13,6 +13,7 @@ const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const helperAppPath = resolveMacosHelperAppPath();
 const helperExecutablePath = path.join(helperAppPath, "Contents", "MacOS", "bridge");
 const helperSourceHashPath = path.join(helperAppPath, "Contents", "Resources", "source.sha256");
+const helperInstalledHashPath = path.join(helperAppPath, "Contents", "Resources", "installed.sha256");
 const helperBundleId = "dev.myagentworkstation.bcu";
 const helperSources = ["agent_cursor.swift", "agent_cursor_motion.swift", "bridge.swift"].map((file) => path.join(rootDir, "native", "macos", file));
 const prebuiltPath = path.join(rootDir, "prebuilt", "macos", "arm64", "bridge");
@@ -85,20 +86,23 @@ async function installHelper(sourcePath) {
 </dict></plist>\n`;
 	const sourceHash = await hash(sourcePath);
 	const infoPath = path.join(helperAppPath, "Contents", "Info.plist");
-	const existingHash = await fs.readFile(helperSourceHashPath, "utf8").catch(() => undefined);
+	const existingSourceHash = (await fs.readFile(helperSourceHashPath, "utf8").catch(() => undefined))?.trim();
+	const existingInstalledHash = (await fs.readFile(helperInstalledHashPath, "utf8").catch(() => undefined))?.trim();
 	const existingInfo = await fs.readFile(infoPath, "utf8").catch(() => undefined);
 	const installedHash = await hash(helperExecutablePath).catch(() => undefined);
 	const infoMatches = comparableInfo(existingInfo) === comparableInfo(infoPlist);
-	if (installedHash === sourceHash && infoMatches) {
+	// Signing rewrites the Mach-O, so the installed binary never hashes to the source
+	// hash; installed.sha256 records the final post-sign bytes for tamper detection.
+	const installedIntact = installedHash !== undefined && installedHash === existingInstalledHash;
+	if (existingSourceHash === sourceHash && installedIntact && infoMatches) {
 		await registerHelperApp();
 		return false;
 	}
-	const installedHelperIsIntact = installedHash !== undefined && existingInfo !== undefined && existingHash?.trim() === installedHash;
-	if (runtime && ((installedHash === sourceHash && existingInfo !== undefined) || installedHelperIsIntact)) {
+	if (runtime && installedIntact) {
 		console.warn("[bcu] installed helper is intact but has older metadata or code; continuing without replacement to preserve macOS permissions.");
 		return false;
 	}
-	if (installedHelperIsIntact && process.env.BCU_NO_SIGN !== "1" && !allowAdhocUpdate && !process.env.BCU_CODESIGN_IDENTITY) {
+	if (installedIntact && process.env.BCU_NO_SIGN !== "1" && !allowAdhocUpdate && !process.env.BCU_CODESIGN_IDENTITY) {
 		throw new Error("Refusing to replace an installed ad-hoc helper because macOS may reset permissions. Use a signed identity or set BCU_ALLOW_ADHOC_UPDATE=1 for local development.");
 	}
 	await fs.mkdir(path.dirname(helperExecutablePath), { recursive: true });
@@ -108,6 +112,7 @@ async function installHelper(sourcePath) {
 	await fs.writeFile(infoPath, infoPlist);
 	await fs.writeFile(helperSourceHashPath, `${sourceHash}\n`);
 	await signHelper();
+	await fs.writeFile(helperInstalledHashPath, `${await hash(helperExecutablePath)}\n`);
 	await registerHelperApp();
 	return true;
 }

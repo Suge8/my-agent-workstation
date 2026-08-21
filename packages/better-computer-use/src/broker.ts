@@ -180,6 +180,9 @@ function signalReady(): void {
 }
 
 export async function serveBroker(): Promise<void> {
+	// The launching client destroys our stderr pipe once startup completes; a later
+	// write (e.g. codesign output passthrough) must not crash the daemon with EPIPE.
+	process.stderr.on("error", () => {});
 	let startupLock = acquireStartupLock();
 	let shouldStart: boolean;
 	try {
