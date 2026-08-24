@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # shellcheck disable=SC2034 # Consumed by the sourcing setup script.
-WORKSTATION_VERSION='0.1.0'
+WORKSTATION_VERSION='0.1.1'
 PI_AGENT_HOME=${PI_AGENT_HOME:-"$HOME/.pi/agent"}
 XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-"$HOME/.config"}
 PACKAGE_HOME="$STATE_HOME/pi-package"
