@@ -78,25 +78,30 @@ const dormant = {
 };
 
 test("restore rejects malformed identities, duplicate Pi sessions and foreign versions", () => {
-	expect(restoreMasterState({ version: 4, workers: [dormant] })).toBeUndefined();
-	expect(restoreMasterState({ version: 5, workers: [{ ...dormant, status: "closed" }] })).toBeUndefined();
-	expect(restoreMasterState({ version: 5, workers: [{ ...dormant, thinking: "huge" }] })).toBeUndefined();
-	expect(restoreMasterState({ version: 5, workers: [dormant, dormant] })).toBeUndefined();
+	expect(restoreMasterState({ version: 5, workers: [dormant] })).toBeUndefined();
+	// 会话路径是派发时预分配的身份，任何状态都不得缺失。
 	expect(restoreMasterState({
-		version: 5,
+		version: 6,
+		workers: [{ ...dormant, sessionPath: undefined, status: "working", paneId: "w1:p2", tabId: "w1:t2" }],
+	})).toBeUndefined();
+	expect(restoreMasterState({ version: 6, workers: [{ ...dormant, status: "closed" }] })).toBeUndefined();
+	expect(restoreMasterState({ version: 6, workers: [{ ...dormant, thinking: "huge" }] })).toBeUndefined();
+	expect(restoreMasterState({ version: 6, workers: [dormant, dormant] })).toBeUndefined();
+	expect(restoreMasterState({
+		version: 6,
 		workers: [dormant, { ...dormant, name: "worker-2" }],
 	})).toBeUndefined();
-	expect(restoreMasterState({ version: 5, workers: [dormant] })).toEqual({ version: 5, workers: [dormant] });
+	expect(restoreMasterState({ version: 6, workers: [dormant] })).toEqual({ version: 6, workers: [dormant] });
 	const blocked = { ...dormant, status: "blocked", paneId: "w1:p2", tabId: "w1:t2" };
-	expect(restoreMasterState({ version: 5, workers: [blocked] })).toEqual({ version: 5, workers: [blocked] });
+	expect(restoreMasterState({ version: 6, workers: [blocked] })).toEqual({ version: 6, workers: [blocked] });
 	const reviewing = { ...blocked, status: "reviewing" };
-	expect(restoreMasterState({ version: 5, workers: [reviewing] })).toEqual({ version: 5, workers: [reviewing] });
+	expect(restoreMasterState({ version: 6, workers: [reviewing] })).toEqual({ version: 6, workers: [reviewing] });
 });
 
-test("v5 新字段（cwd/interruptedAt/disposition）类型错误拒绝，合法值保留", () => {
-	expect(restoreMasterState({ version: 5, workers: [{ ...dormant, cwd: "" }] })).toBeUndefined();
-	expect(restoreMasterState({ version: 5, workers: [{ ...dormant, interruptedAt: -1 }] })).toBeUndefined();
-	expect(restoreMasterState({ version: 5, workers: [{ ...dormant, disposition: "nagged" }] })).toBeUndefined();
+test("cwd/interruptedAt/disposition 类型错误拒绝，合法值保留", () => {
+	expect(restoreMasterState({ version: 6, workers: [{ ...dormant, cwd: "" }] })).toBeUndefined();
+	expect(restoreMasterState({ version: 6, workers: [{ ...dormant, interruptedAt: -1 }] })).toBeUndefined();
+	expect(restoreMasterState({ version: 6, workers: [{ ...dormant, disposition: "nagged" }] })).toBeUndefined();
 	const interrupted = {
 		...dormant,
 		status: "idle",
@@ -106,7 +111,7 @@ test("v5 新字段（cwd/interruptedAt/disposition）类型错误拒绝，合法
 		interruptedAt: 1700000000000,
 		disposition: "pending",
 	};
-	expect(restoreMasterState({ version: 5, workers: [interrupted] })).toEqual({ version: 5, workers: [interrupted] });
+	expect(restoreMasterState({ version: 6, workers: [interrupted] })).toEqual({ version: 6, workers: [interrupted] });
 });
 
 test("Worker Pool state atomically overwrites one file instead of appending session entries", async () => {
@@ -150,13 +155,28 @@ test("a corrupt current state fails closed instead of reviving an older snapshot
 	await rm(directory, { recursive: true, force: true });
 });
 
+test("旧版状态：只读调用方只拿到错误，状态所有者丢弃后从空池重建", async () => {
+	const directory = await mkdtemp(join(tmpdir(), "firecode-master-legacy-"));
+	const path = join(directory, "state.json");
+	await writeFile(path, JSON.stringify({ version: 5, workers: [{ ...dormant, sessionPath: "/tmp/legacy.jsonl" }] }));
+	// 只读旁路（bark 等）不得删文件：否则会抢先删掉 Master 的告知依据。
+	expect(() => loadMasterState(path)).toThrow("旧版 v5");
+	expect(() => loadMasterState(path)).toThrow("旧版 v5");
+	// 不迁移也不永久阻断：所有者丢弃旧文件，从空池重建并落盘当前版本。
+	const store = new MasterStore(path);
+	expect(store.state.workers).toEqual([]);
+	store.dispatch({ type: "UPSERT_WORKER", worker: dormant });
+	expect(loadMasterState(path)?.workers).toHaveLength(1);
+	await rm(directory, { recursive: true, force: true });
+});
+
 test("reducer records reviewing and removes forgotten Workers", () => {
 	let state = reduceMaster(initialMasterState(), { type: "UPSERT_WORKER", worker: dormant });
 	state = reduceMaster(state, {
 		type: "UPSERT_WORKER",
 		worker: { ...dormant, status: "reviewing", paneId: "w1:p2", tabId: "w1:t2" },
 	});
-	expect(state).toMatchObject({ version: 5, workers: [{ status: "reviewing" }] });
+	expect(state).toMatchObject({ version: 6, workers: [{ status: "reviewing" }] });
 	state = reduceMaster(state, { type: "REMOVE_WORKER", name: "worker-1" });
 	expect(state.workers).toEqual([]);
 });

@@ -494,7 +494,7 @@ test("crash 后未 ack 的 Worker 结果在恢复时重投并补 ack", async () 
 	const statePath = masterStatePath(sessionId);
 	const { writeFileSync, rmSync } = await import("node:fs");
 	writeFileSync(statePath, JSON.stringify({
-		version: 5,
+		version: 6,
 		workers: [{ name: "worker-1", model: "p/m", thinking: "medium", status: "dormant", sessionPath: "/tmp/w.jsonl" }],
 	}));
 	const handlers = new Map<string, ((event: unknown, ctx: unknown) => unknown)[]>();

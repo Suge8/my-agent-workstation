@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { SessionManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { REVIEW_OCCUPANCY_LABEL, readReviewOutcome, type ReviewOutcome } from "../review/outcome.js";
 import { sectionLine } from "./event-format.js";
 import {
@@ -25,6 +25,9 @@ const MAX_RETRY_DELAY_MS = 30_000;
  * herdr 进程快照在高负载下的瞬态误判（实测：同机两个重载型 Worker 并行时四连败），
  * 退避重试到窗口用尽必然成功或暴露真实故障。 */
 const START_BUSY_RETRY_WINDOW_MS = 15_000;
+/** Pi 报到超时：满载机器上「进程起来」到「扩展加载完」实测最长约 9s，到点未报到即判启动失败。 */
+const WORKER_READY_TIMEOUT_MS = 60_000;
+const WORKER_READY_POLL_MS = 500;
 /** 占用信号失效时审查监听的轮询兑底间隔。 */
 const REVIEW_POLL_DELAY_MS = 2_000;
 /** 中断后无人接手的自动续跑等待：定时即业务语义（把流程交还指挥官），非轮询。 */
@@ -62,9 +65,6 @@ interface StartWorkerOptions {
 interface WorkerLaunch {
 	provisional: WorkerRef;
 	prompt: string;
-	model: string;
-	thinking: WorkerThinking;
-	sessionPath?: string;
 	previous?: WorkerRef;
 	shell: WorkerShell;
 	shellReady: Awaited<ReturnType<typeof createShellReadyMarker>>;
@@ -183,9 +183,9 @@ export class HerdrWorkers {
 		if (!model) throw new Error("start 需要 model：从选型表挑一个，或传休眠子代理名/session 沿用其档案");
 		const thinking = parseThinking(options.thinking) ?? dormant?.thinking;
 		if (!thinking) throw new Error("start 需要 thinking：按任务深浅显式定档，或传休眠子代理名/session 沿用其档案");
-		const sessionPath = dormant?.sessionPath ?? options.session?.trim();
 		// cwd 校验失败即拒绝：静默回退 Master 目录会让子代理在错误的 checkout 真实动手。
 		const cwd = await resolveWorkerCwd(options.cwd ?? dormant?.cwd);
+		const sessionPath = dormant?.sessionPath ?? options.session?.trim() ?? newSessionPath(cwd ?? ctx.cwd);
 		const previous = dormant;
 		if (dormant && dormant.name !== name)
 			this.store.dispatch({ type: "REMOVE_WORKER", name: dormant.name });
@@ -196,7 +196,7 @@ export class HerdrWorkers {
 			status: "starting",
 			paneId: "starting",
 			tabId: "starting",
-			...(sessionPath ? { sessionPath } : {}),
+			sessionPath,
 			...(cwd ? { cwd } : {}),
 			...(options.review || dormant?.reviewNeeded ? { reviewNeeded: true } : {}),
 		};
@@ -215,7 +215,7 @@ export class HerdrWorkers {
 				type: "UPSERT_WORKER",
 				worker: { ...provisional, paneId: shell.paneId, tabId: shell.tabId },
 			});
-			return { provisional, prompt, model, thinking, sessionPath, previous, shell, shellReady, controller: startController, signal };
+			return { provisional, prompt, previous, shell, shellReady, controller: startController, signal };
 		} catch (error) {
 			await this.abandonStart(name, previous, undefined, startController);
 			if (shellReady) await this.removeShellReady(name, shellReady);
@@ -228,14 +228,10 @@ export class HerdrWorkers {
 		const name = launch.provisional.name;
 		try {
 			await this.waitForShell(launch.shell.paneId, launch.shellReady.marker, launch.signal);
-			const worker = await this.startAgent(
-				launch.provisional,
-				launch.shell.paneId,
-				launch.model,
-				launch.thinking,
-				launch.sessionPath,
-				launch.signal,
-			);
+			const started = await this.startAgent(launch.provisional, launch.shell.paneId, launch.signal);
+			await this.waitForPiReady(started, launch.signal);
+			const worker: WorkerRef = { ...started, status: "working" };
+			this.store.dispatch({ type: "UPSERT_WORKER", worker });
 			if (this.runs.get(name) === launch.controller) this.runs.delete(name);
 			void this.monitorPrompt(worker, launch.prompt);
 			return worker;
@@ -333,7 +329,7 @@ export class HerdrWorkers {
 	 */
 	async tail(workerName: string): Promise<string> {
 		const worker = requireWorker(this.store.state, workerName);
-		if (!worker.sessionPath) throw new Error(`${worker.name} 仍在启动，还没有会话可读`);
+		if (worker.status === "starting") throw new Error(`${worker.name} 仍在启动，还没有会话可读`);
 		const trace = await readWorkerTrace(worker.sessionPath);
 		return `子代理 ${worker.name} 近况（${worker.status}）\n${trace}`;
 	}
@@ -341,9 +337,7 @@ export class HerdrWorkers {
 	async review(workerName: string): Promise<void> {
 		const worker = requireWorker(this.store.state, workerName);
 		if (worker.status !== "idle") throw new Error(`${worker.name} 当前是 ${worker.status}，只有 idle Worker 可以审查`);
-		const previousRunId = worker.sessionPath
-			? reviewRunId(readReviewOutcome(worker.sessionPath)) ?? null
-			: null;
+		const previousRunId = reviewRunId(readReviewOutcome(worker.sessionPath)) ?? null;
 		// 投递窗口纳入 stop 的中止范围：idle Worker 只可能挂着中断续监，先让它退位；
 		// 不注册的话 stop 中止不到在飞投递，迟到返回会复活已休眠的 Worker。
 		this.runs.get(worker.name)?.abort();
@@ -361,9 +355,7 @@ export class HerdrWorkers {
 		} catch (error) {
 			if (!isPromptStall(error)) throw this.reviewDeliveryFailure(worker.name, controller, error);
 			// 占用信号失效时会话可能全程观察不到状态变化：以 runId 是否推进判定审查是否真的启动。
-			const observed = worker.sessionPath
-				? reviewRunId(readReviewOutcome(worker.sessionPath)) ?? null
-				: null;
+			const observed = reviewRunId(readReviewOutcome(worker.sessionPath)) ?? null;
 			if (observed === previousRunId)
 				throw this.reviewDeliveryFailure(
 					worker.name,
@@ -405,7 +397,8 @@ export class HerdrWorkers {
 		}
 		const worker = existing;
 		if (worker.status !== "dormant") await this.closeOwnedWorker(worker);
-		if (forget || !worker.sessionPath) {
+		// starting 子代理的会话可能从未落盘，没有可恢复内容，与 forget 同路。
+		if (forget || worker.status === "starting") {
 			this.store.dispatch({ type: "REMOVE_WORKER", name: worker.name });
 			return;
 		}
@@ -514,47 +507,46 @@ export class HerdrWorkers {
 		return { target: occupants[1], direction: "down" };
 	}
 
-	private async startAgent(
-		provisional: WorkerRef,
-		paneId: string,
-		model: string,
-		thinking: WorkerThinking,
-		sessionPath?: string,
-		signal?: AbortSignal,
-	): Promise<WorkerRef> {
-		const args = [
-			"agent",
-			"start",
-			agentName(provisional.name, model),
-			"--kind",
-			"pi",
-			"--pane",
-			paneId,
-			"--timeout",
-			"60000",
+	private async startAgent(provisional: WorkerRef, paneId: string, signal?: AbortSignal): Promise<WorkerRef> {
+		const { name, model, thinking, sessionPath } = provisional;
+		const agent = parseAgent(await this.startAgentProcess([
+			"agent", "start", agentName(name, model), "--kind", "pi", "--pane", paneId, "--timeout", "60000",
 			"--",
-			"--name",
-			`↳${displayName(provisional.name, model)}`,
-			"--model",
-			model,
-			"--thinking",
-			thinking,
-		];
-		if (sessionPath) args.push("--session", sessionPath);
-		const agent = parseAgent(await this.startAgentProcess(args, paneId, signal));
-		const worker: WorkerRef = {
-			name: provisional.name,
-			paneId: agent.pane_id,
-			tabId: agent.tab_id,
-			sessionPath: requireSessionPath(agent),
-			model,
-			thinking,
-			status: "working",
-			...(provisional.cwd ? { cwd: provisional.cwd } : {}),
-			...(provisional.reviewNeeded ? { reviewNeeded: true } : {}),
-		};
+			"--name", `↳${displayName(name, model)}`,
+			"--model", model,
+			"--thinking", thinking,
+			// 新建与休眠恢复同一条下发路径：会话身份始终是入参，不是启动后的观测结果。
+			"--session", sessionPath,
+		], paneId, signal));
+		const worker: WorkerRef = { ...provisional, paneId: agent.pane_id, tabId: agent.tab_id };
 		this.store.dispatch({ type: "UPSERT_WORKER", worker });
 		return worker;
+	}
+
+	/**
+	 * 等 Pi 报到再投任务。herdr 的就绪判定只看进程与屏幕（固定 3s 静默期），早于 Pi 真正接管输入：
+	 * 启动期投进去的文本只会被塞回输入框（Pi 提示 Startup is still in progress），任务永远不会开始。
+	 * Pi 上报会话身份发生在扩展加载完之后，是可用的接活信号；herdr 只为状态变化提供事件（agent wait），
+	 * 身份上报无事件接口，故此处有界轮询。
+	 */
+	private async waitForPiReady(worker: WorkerRef, signal: AbortSignal): Promise<void> {
+		const deadline = Date.now() + WORKER_READY_TIMEOUT_MS;
+		while (!signal.aborted) {
+			const live = parseAgent(await this.run(
+				"agent.get(ready)",
+				["agent", "get", requiredPane(worker)],
+				10_000,
+				signal,
+			));
+			const reported = optionalSessionPath(live);
+			if (sessionDrifted(worker, reported))
+				throw new Error(`${worker.name} 启动后报到的会话与派发的不一致：${reported}`);
+			if (reported) return;
+			if (Date.now() >= deadline)
+				throw new Error(`${worker.name} 启动后 ${WORKER_READY_TIMEOUT_MS / 1000}s 内 Pi 未报到，任务未投递`);
+			await retryDelay(WORKER_READY_POLL_MS, signal);
+		}
+		throw new Error(`${worker.name} 启动已被停止`);
 	}
 
 	/** agent.start 对 agent_pane_busy 退避重试；窗口用尽后附 pane 前台快照作诊断证据。 */
@@ -612,8 +604,15 @@ export class HerdrWorkers {
 			this.makeDormantOrForget(worker, "子代理进程已不存在");
 			return;
 		}
-		const sessionPath = optionalSessionPath(live);
-		if (!sessionPath || (worker.sessionPath && worker.sessionPath !== sessionPath)) {
+		// starting 严格等于“任务尚未投递”（投递前置是 Pi 报到）：reload 打断的启动收干净交还指挥官，
+		// 不能当成 working 去等一个永远不会来的结算。
+		if (worker.status === "starting") {
+			await this.closeOwnedWorker(worker);
+			this.store.dispatch({ type: "REMOVE_WORKER", name: worker.name });
+			this.notifyMaster(`${worker.name} 的启动被打断，任务未投递，需要重新 start`);
+			return;
+		}
+		if (sessionDrifted(worker, optionalSessionPath(live))) {
 			this.makeDormantOrForget(worker, "Worker session 身份已变化");
 			return;
 		}
@@ -621,7 +620,6 @@ export class HerdrWorkers {
 			...worker,
 			paneId: live.pane_id,
 			tabId: live.tab_id,
-			sessionPath,
 			status: reconciledStatus(worker.status),
 		};
 		this.store.dispatch({ type: "UPSERT_WORKER", worker: refreshed });
@@ -633,10 +631,10 @@ export class HerdrWorkers {
 		else if (refreshed.status === "idle" && refreshed.reviewNeeded) void this.autoReview(refreshed.name);
 	}
 
+	/** starting 失联无会话内容可恢复（路径已预分配但 Pi 可能从未落盘），直接忘掉。 */
 	private makeDormantOrForget(worker: WorkerRef, reason: string): void {
-		if (worker.sessionPath)
-			this.store.dispatch({ type: "UPSERT_WORKER", worker: dormantWorker(worker) });
-		else this.store.dispatch({ type: "REMOVE_WORKER", name: worker.name });
+		if (worker.status === "starting") this.store.dispatch({ type: "REMOVE_WORKER", name: worker.name });
+		else this.store.dispatch({ type: "UPSERT_WORKER", worker: dormantWorker(worker) });
 		this.notifyMaster(`${worker.name} ${reason}`);
 	}
 
@@ -756,6 +754,7 @@ export class HerdrWorkers {
 		const status = settlementStatus(agent);
 		const current = currentWorkerRun(this.store.state.workers, worker);
 		if (!current || current.status === "dormant") return "done";
+		if (this.settlementDrifted(worker, agent)) return "done";
 		if (status === "blocked") {
 			const label = stateLabel(agent);
 			// 审查占用（如用户外部手动 /fire-review）不是 Worker 提问：转 reviewing 继续等终态。
@@ -771,7 +770,7 @@ export class HerdrWorkers {
 			this.notifyMaster(workerBlockedText(blocked, question));
 			return "done";
 		}
-		const latest = await this.latest(worker);
+		const latest = await readLatestAssistant(worker.sessionPath);
 		// 任意结算都消费在飞标记：esc 未命中（回合恰好自然结束）时标记不得残留到下次中断。
 		const deliberate = this.deliberateInterrupts.delete(worker.name);
 		if (signal.aborted) return "done";
@@ -801,6 +800,17 @@ export class HerdrWorkers {
 		}
 		this.notifyMaster(workerResultText(settled, latest), settled.name);
 		return "done";
+	}
+
+	/**
+	 * 结算响应里的会话与档案冲突：pane 里的 Pi 已经不是派出去的那个（如用户在子代理里 /new）。
+	 * 继续读档案路径会把上一个会话的旧回复当成本轮结果回传，故转休眠交还指挥官。
+	 */
+	private settlementDrifted(worker: WorkerRef, agent: HerdrAgent): boolean {
+		if (!sessionDrifted(worker, optionalSessionPath(agent))) return false;
+		const current = currentWorkerRun(this.store.state.workers, worker);
+		if (current) this.makeDormantOrForget(current, "Worker session 身份已变化");
+		return true;
 	}
 
 	/**
@@ -892,15 +902,14 @@ export class HerdrWorkers {
 		signal: AbortSignal,
 		previousRunId?: string | null,
 	): Promise<boolean> {
-		const status = settlementStatus(parseAgent(response));
-		if (status === "blocked") throw new Error("Herdr 审查等待错误返回 blocked");
-		const latest = await this.latest(worker);
+		const agent = parseAgent(response);
+		if (settlementStatus(agent) === "blocked") throw new Error("Herdr 审查等待错误返回 blocked");
+		if (this.settlementDrifted(worker, agent)) return true;
+		const latest = await readLatestAssistant(worker.sessionPath);
 		if (signal.aborted) return true;
 		const settled = currentWorkerRun(this.store.state.workers, worker);
 		if (!settled || settled.status !== "reviewing") return true;
-		const observed: ReviewOutcome = settled.sessionPath
-			? readReviewOutcome(settled.sessionPath)
-			: { status: "error", message: "子代理缺少 Pi session 路径" };
+		const observed = readReviewOutcome(settled.sessionPath);
 		const stale = previousRunId !== undefined && (reviewRunId(observed) ?? null) === previousRunId;
 		// runId 已推进但仍在循环中：占用信号失效时轮间会观测到 idle，不能就此结算。
 		if (!stale && observed.status === "in_progress") return false;
@@ -911,11 +920,6 @@ export class HerdrWorkers {
 		this.store.dispatch({ type: "UPSERT_WORKER", worker: { ...finished, status: "idle" } });
 		this.notifyMaster(reviewResultText(settled, outcome, latest), settled.name);
 		return true;
-	}
-
-	private async latest(worker: WorkerRef): Promise<LatestAssistant | undefined> {
-		const live = parseAgent(await this.run("agent.get", ["agent", "get", requiredPane(worker)]));
-		return readLatestAssistant(requireSessionPath(live));
 	}
 
 	private async closeOwnedWorker(worker: WorkerRef): Promise<void> {
@@ -931,9 +935,10 @@ export class HerdrWorkers {
 			}
 			return;
 		}
-		const sessionPath = optionalSessionPath(live);
-		const owned = worker.sessionPath
-			? sessionPath === worker.sessionPath
+		// 尚未报到的启动中子代理没有会话可对，退回 pane/tab 归属判定。
+		const reported = optionalSessionPath(live);
+		const owned = reported
+			? reported === worker.sessionPath
 			: live.pane_id === worker.paneId && live.tab_id === worker.tabId;
 		if (!owned) return;
 		const sharedTab = liveWorkers(this.store.state).some((candidate) =>
@@ -1091,10 +1096,9 @@ function parseAgent(response: Record<string, unknown>): HerdrAgent {
 	};
 }
 
-function requireSessionPath(agent: HerdrAgent): string {
-	const path = optionalSessionPath(agent);
-	if (path) return path;
-	throw new Error("Herdr 响应缺少持久 Pi session 路径");
+/** 上报缺失＝Pi 尚未报到，不是漂移；只有报上来的会话与档案冲突才是身份变了。 */
+function sessionDrifted(worker: WorkerRef, reported?: string): boolean {
+	return !!reported && reported !== worker.sessionPath;
 }
 
 function optionalSessionPath(agent: HerdrAgent): string | undefined {
@@ -1134,6 +1138,17 @@ function isPromptStall(error: unknown): boolean {
 /** pane/tab/Pi 会话的统一显示名：任务名-模型名，一眼认出谁在干什么、用的什么。 */
 function displayName(name: string, model: string): string {
 	return `${name}-${model.split("/").pop()}`;
+}
+
+/**
+ * 会话身份由派发方预分配：Pi 启动后才上报路径，等它上报等于把身份建立在观测上——
+ * 上报晚于 herdr 的就绪判定时启动就会失败。用官方接口预生成路径（建目录、不落文件），
+ * 随 --session 下发，档案从第一刻起就是会话身份的唯一事实源。
+ */
+function newSessionPath(cwd: string): string {
+	const path = SessionManager.create(cwd).getSessionFile();
+	if (!path) throw new Error("无法为子代理预分配 Pi session 路径");
+	return path;
 }
 
 /**
@@ -1331,7 +1346,6 @@ function settlementStatus(agent: HerdrAgent): "idle" | "blocked" | "done" {
 }
 
 function dormantWorker(worker: WorkerRef): WorkerRef {
-	if (!worker.sessionPath) throw new Error(`${worker.name} 缺少可恢复 session`);
 	return {
 		name: worker.name,
 		model: worker.model,

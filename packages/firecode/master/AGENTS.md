@@ -24,6 +24,21 @@ start 的 `cwd` 参数指定子代理工作目录（绝对路径、必须已存�
 checkout 仍是默认。`agent.start` 对 `agent_pane_busy` 退避重试 15s（herdr 进程快照高负载瞬态误判；shell
 标记已匹配故 busy 必为瞬态），窗口用尽附 pane process-info 证据。
 
+## 启动：身份预分配 + 报到门槛
+
+会话身份是派发的入参不是启动后的观测（ADR-0008）：分配阶段用官方 `SessionManager.create(cwd)` 预生成
+会话文件路径（建目录、不落文件），新建与休眠恢复同走 `--session` 下发；档案里的 `sessionPath` 是唯一
+事实源，任何状态都不得缺失。herdr 上报的 `agent_session` 只用于身份漂移判定：缺失＝尚未报到（不是漂移），
+只有与档案冲突才是身份变了。凡拿到 herdr agent 记录的地方都走同一判据：启动期冲突直接失败回收 pane，
+reconcile 与工作/审查结算遇冲突转休眠（不能拿上一个会话的旧回复当本轮结果回传）。
+
+herdr 的就绪判定（固定 3s 静默期后进程在前台）早于 Pi 真正接活：启动期提交只会被塞回输入框（Startup is
+still in progress），长文本还会被终端行缓冲截断。因此 `agent.start` 后等 Pi 报到（会话上报，发生在扩展加载
+之后）才投 prompt，60s 未报到即启动失败；该上报无事件接口（`agent wait` 只管状态），是有界轮询的例外。
+
+因此 `starting` 严格等于“任务尚未投递”：reload 撞上启动窗口时 reconcile 收 pane、清档案并要求重新 start，
+不转 working 去等一个永远不会到的结算；同理 stop 与失联都直接忘掉 starting 子代理（会话可能从未落盘）。
+
 ## 结果回传与发落
 
 结果用 custom follow-up message 投递，事件卡默认紧凑（每事件一行「标题 — 正文首句」按宽截断，ctrl+o
@@ -110,8 +125,10 @@ Worker 带 `FIRECODE_MASTER_WORKER` 启动，用 pi 默认工具集（read/bash/
 fire-review + Master diff 检查 + git 回滚。`tool_call` 仍把 edit/write 限在当前 checkout（含真实路径解析），
 定位是防误伤——bash 可绕过，不伪装成隔离；真需物理隔离得上容器或只读挂载。
 
-Worker Pool 状态 schema 只认 v5（无用户，不留旧版兼容），用 mode 0600 的单个文件原子覆盖，不向 Pi session
-追加快照；reload 恢复观察，quit/new/resume/fork 和 `/fire-master off` 清理。
+Worker Pool 状态 schema 只认 v6（无用户，不留旧版兼容），用 mode 0600 的单个文件原子覆盖，不向 Pi session
+追加快照；reload 恢复观察，quit/new/resume/fork 和 `/fire-master off` 清理。旧版文件不迁移也不得永久
+阻断激活：只有状态所有者 MasterStore 丢弃它并从空池重建，`loadMasterState` 对只读旁路（bark、恢复前探）
+只招 `LegacyMasterStateError` 不删文件——旁路抢先删掉就丢了“旧池已脱管”的告知依据（脱管子代理发现即收编）。
 
 状态栏指挥官行由 store 变更驱动（MasterStore onChange，落盘后通知），UI 是状态的纯投影；禁止在动作调用点
 手动补重绘——散落调用点必漏异步转态（send 后卡「闲」、自动补审不显「审」是真实事故）。唯一例外是

@@ -1,10 +1,24 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { appendFile, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { masterEventDetails } from "../master/event-format.js";
-import { HerdrWorkers } from "../master/herdr.js";
+import type { HerdrWorkers as HerdrWorkersType } from "../master/herdr.js";
 import { MasterStore, type WorkerRef } from "../master/state.js";
+import { cleanupFirecodeModules, loadFirecodeModule } from "./loader.ts";
+
+// 启动前预分配会话路径要用官方 SessionManager，因此本模块需要实体宿主包。
+const { HerdrWorkers } = await loadFirecodeModule("master/herdr.js") as {
+	HerdrWorkers: typeof HerdrWorkersType;
+};
+
+// Agent 目录指向临时目录，预分配建的会话目录不落到真实 ~/.pi；进程级变量只在本文件跑的窗口内生效。
+const savedAgentDir = process.env.PI_CODING_AGENT_DIR;
+let agentDir = "";
+beforeAll(async () => {
+	agentDir = await mkdtemp(join(tmpdir(), "firecode-master-agent-"));
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+});
 
 const savedShell = process.env.SHELL;
 const statePaths: string[] = [];
@@ -12,6 +26,12 @@ afterEach(async () => {
 	if (savedShell === undefined) delete process.env.SHELL;
 	else process.env.SHELL = savedShell;
 	for (const path of statePaths.splice(0)) await rm(path, { force: true });
+});
+afterAll(async () => {
+	if (savedAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+	else process.env.PI_CODING_AGENT_DIR = savedAgentDir;
+	if (agentDir) await rm(agentDir, { recursive: true, force: true });
+	await cleanupFirecodeModules();
 });
 
 function createStore(): MasterStore {
@@ -138,7 +158,7 @@ test("start can resume a Dormant Worker with its exact Pi session", async () => 
 				if (args[0] === "tab" && args[1] === "create")
 					return response({ result: { root_pane: { pane_id: "w1:p2" }, tab: { tab_id: "w1:t2" } } });
 				if (args[0] === "pane" && args[1] === "wait-output") return response({});
-				if (args[0] === "agent" && args[1] === "start") return liveAgent();
+				if (args[0] === "agent" && (args[1] === "start" || args[1] === "get")) return liveAgent();
 				if (args[0] === "agent" && args[1] === "prompt")
 					return new Promise((resolve) =>
 						options.signal?.addEventListener("abort", () => resolve(response({})), { once: true }),
@@ -259,7 +279,8 @@ test("a failed split falls back to a new tab", async () => {
 			if (args[0] === "tab" && args[1] === "create")
 				return response({ result: { root_pane: { pane_id: "w1:p3" }, tab: { tab_id: "w1:t3" } } });
 			if (args[0] === "pane" && args[1] === "wait-output") return response({});
-			if (args[0] === "agent" && args[1] === "start") return agentResponse("w1:p3", "w1:t3", "/tmp/worker-2.jsonl");
+			if (args[0] === "agent" && (args[1] === "start" || args[1] === "get"))
+				return reportedAgent(store, "w1:p3", "w1:t3");
 			if (args[0] === "agent" && args[1] === "prompt")
 				return new Promise((resolve) => options.signal?.addEventListener("abort", () => resolve(response({})), { once: true }));
 			return response({});
@@ -278,6 +299,151 @@ test("a failed split falls back to a new tab", async () => {
 		(args[0] === "pane" && args[1] === "split") || (args[0] === "tab" && args[1] === "create")
 	).map((args) => args.slice(0, 2))).toEqual([["pane", "split"], ["tab", "create"]]);
 	expect(store.state.workers.find((item) => item.name === "worker-2")).toMatchObject({ status: "working", tabId: "w1:t3" });
+	pool.shutdown();
+});
+
+test("Pi 未报到之前不投任务：等会话上报后才发 prompt", async () => {
+	process.env.SHELL = "/bin/zsh";
+	const store = createStore();
+	const calls: string[][] = [];
+	let polls = 0;
+	const pool = new HerdrWorkers({
+		pi: { exec: async (_command: string, args: string[], options: { signal?: AbortSignal }) => {
+			calls.push(args);
+			if (args[0] === "tab" && args[1] === "create")
+				return response({ result: { root_pane: { pane_id: "w1:p2" }, tab: { tab_id: "w1:t2" } } });
+			// herdr 说“起来了”时 Pi 还在加载扩展，首次查询拿不到会话。
+			if (args[0] === "agent" && args[1] === "start") return agentResponse("w1:p2", "w1:t2", "");
+			if (args[0] === "agent" && args[1] === "get")
+				return ++polls > 1 ? reportedAgent(store, "w1:p2", "w1:t2") : agentResponse("w1:p2", "w1:t2", "");
+			if (args[0] === "agent" && args[1] === "prompt")
+				return new Promise((resolve) => options.signal?.addEventListener("abort", () => resolve(response({})), { once: true }));
+			return response({});
+		} } as never,
+		store,
+		workspaceId: "w1",
+		notifyMaster() {},
+	});
+	const started = await pool.start(
+		{ cwd: "/tmp", model: { provider: "p", id: "m" }, thinkingLevel: "medium" } as never,
+		{ name: "worker-2", model: "p/m", thinking: "medium", prompt: "做" },
+	);
+	expect(started.status).toBe("working");
+	// 启动期投递只会被 Pi 塞回输入框（Startup is still in progress），任务永远不会开始：
+	// prompt 必须排在两次报到查询之后。
+	expect(calls.filter((args) => args[0] === "agent" && args[1] !== "start").map((args) => args[1]))
+		.toEqual(["get", "get", "prompt"]);
+	pool.shutdown();
+});
+
+test("报到的会话与派发的不一致：启动失败并收回 pane", async () => {
+	process.env.SHELL = "/bin/zsh";
+	const store = createStore();
+	const calls: string[][] = [];
+	const pool = new HerdrWorkers({
+		pi: { exec: async (_command: string, args: string[]) => {
+			calls.push(args);
+			if (args[0] === "tab" && args[1] === "create")
+				return response({ result: { root_pane: { pane_id: "w1:p2" }, tab: { tab_id: "w1:t2" } } });
+			if (args[0] === "agent" && args[1] === "start") return agentResponse("w1:p2", "w1:t2", "");
+			if (args[0] === "agent" && args[1] === "get")
+				return agentResponse("w1:p2", "w1:t2", "/tmp/foreign.jsonl");
+			return response({});
+		} } as never,
+		store,
+		workspaceId: "w1",
+		notifyMaster() {},
+	});
+	await expect(pool.start(
+		{ cwd: "/tmp", model: { provider: "p", id: "m" }, thinkingLevel: "medium" } as never,
+		{ name: "worker-2", model: "p/m", thinking: "medium", prompt: "做" },
+	)).rejects.toThrow("不一致");
+	expect(store.state.workers).toEqual([]);
+	expect(calls).toContainEqual(["tab", "close", "w1:t2"]);
+});
+
+test("结算时会话已换：不拿旧会话回复当本轮结果，转休眠交还指挥官", async () => {
+	const store = createStore();
+	store.dispatch({ type: "UPSERT_WORKER", worker: worker() });
+	const notices: string[] = [];
+	const pool = new HerdrWorkers({
+		pi: { exec: async (_command: string, args: string[]) => {
+			if (args[0] === "agent" && args[1] === "get") return liveAgent();
+			// 用户在子代理里 /new：结算响应带回另一个会话。
+			if (args[0] === "agent" && args[1] === "wait") return liveAgent("idle", "/tmp/worker-new.jsonl");
+			return response({});
+		} } as never,
+		store,
+		workspaceId: "w1",
+		notifyMaster: (notice) => notices.push(notice),
+	});
+	await pool.resume();
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	expect(store.state.workers[0]).toMatchObject({ status: "dormant", sessionPath: "/tmp/worker.jsonl" });
+	expect(notices.join()).toContain("session 身份已变化");
+	expect(notices.join()).not.toContain("已停下");
+	pool.shutdown();
+});
+
+test("审查结算时会话已换：不拿旧会话终态当审查结果，同样转休眠", async () => {
+	const store = createStore();
+	store.dispatch({ type: "UPSERT_WORKER", worker: worker("reviewing") });
+	const notices: string[] = [];
+	const pool = new HerdrWorkers({
+		pi: { exec: async (_command: string, args: string[]) => {
+			if (args[0] === "agent" && args[1] === "get") return liveAgent();
+			if (args[0] === "agent" && args[1] === "wait") return liveAgent("idle", "/tmp/worker-new.jsonl");
+			return response({});
+		} } as never,
+		store,
+		workspaceId: "w1",
+		notifyMaster: (notice) => notices.push(notice),
+	});
+	await pool.resume();
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	expect(store.state.workers[0]).toMatchObject({ status: "dormant", sessionPath: "/tmp/worker.jsonl" });
+	expect(notices.join()).toContain("session 身份已变化");
+	expect(notices.join()).not.toContain("审查结束");
+	pool.shutdown();
+});
+
+test("reload 打断的启动：收掉 pane 并交还指挥官重派，不假装在跑", async () => {
+	const store = createStore();
+	store.dispatch({ type: "UPSERT_WORKER", worker: worker("starting") });
+	const calls: string[][] = [];
+	const notices: string[] = [];
+	const pool = new HerdrWorkers({
+		pi: { exec: async (_command: string, args: string[]) => {
+			calls.push(args);
+			if (args[0] === "agent" && args[1] === "get") return agentResponse("w1:p2", "w1:t2", "");
+			return response({});
+		} } as never,
+		store,
+		workspaceId: "w1",
+		notifyMaster: (notice) => notices.push(notice),
+	});
+	await pool.resume();
+	expect(store.state.workers).toEqual([]);
+	expect(calls).toContainEqual(["tab", "close", "w1:t2"]);
+	expect(notices.join()).toContain("任务未投递");
+});
+
+test("尚未报到的存活子代理不算身份变化", async () => {
+	const store = createStore();
+	store.dispatch({ type: "UPSERT_WORKER", worker: worker() });
+	const pool = new HerdrWorkers({
+		pi: { exec: async (_command: string, args: string[], options: { signal?: AbortSignal }) => {
+			if (args[0] === "agent" && args[1] === "get") return agentResponse("w1:p2", "w1:t2", "");
+			if (args[0] === "agent" && args[1] === "wait")
+				return new Promise((resolve) => options.signal?.addEventListener("abort", () => resolve(response({})), { once: true }));
+			return response({});
+		} } as never,
+		store,
+		workspaceId: "w1",
+		notifyMaster() {},
+	});
+	await pool.resume();
+	expect(store.state.workers[0]).toMatchObject({ status: "working", sessionPath: "/tmp/worker.jsonl" });
 	pool.shutdown();
 });
 
@@ -329,7 +495,7 @@ test("resuming under a new name replaces the old Dormant identity", async () => 
 		pi: { exec: async (_command: string, args: string[], options: { signal?: AbortSignal }) => {
 			if (args[0] === "tab") return response({ result: { root_pane: { pane_id: "w1:p2" }, tab: { tab_id: "w1:t2" } } });
 			if (args[0] === "pane") return response({});
-			if (args[0] === "agent" && args[1] === "start") return liveAgent();
+			if (args[0] === "agent" && (args[1] === "start" || args[1] === "get")) return liveAgent();
 			if (args[0] === "agent" && args[1] === "prompt")
 				return new Promise((resolve) => options.signal?.addEventListener("abort", () => resolve(response({})), { once: true }));
 			return response({});
@@ -678,14 +844,16 @@ test("workers launch in parallel once layout allocation hands off", async () => 
 			}
 			if (args[0] === "agent" && args[1] === "start") {
 				const paneId = args[args.indexOf("--pane") + 1] as string;
-				return agentResponse(paneId, paneTabs.get(paneId) as string, `/tmp/${args[2]}.jsonl`);
+				return reportedAgent(store, paneId, paneTabs.get(paneId) as string);
 			}
 			if (args[0] === "agent" && args[1] === "prompt")
 				return new Promise((resolve) => {
 					if (options.signal?.aborted) return resolve(response({}));
 					options.signal?.addEventListener("abort", () => resolve(response({})), { once: true });
 				});
-			if (args[0] === "agent" && args[1] === "get") return missingAgent();
+			// 报到查询用 pane 定位；名字定位（reconcile）在本用例里视为已消失。
+			if (args[0] === "agent" && args[1] === "get")
+				return paneTabs.has(args[2] as string) ? reportedAgent(store, args[2] as string, "w1:t1") : missingAgent();
 			return response({});
 		} } as never,
 		store,
@@ -1604,24 +1772,19 @@ test("done keeps the Worker live for Master follow-up", async () => {
 test("a late settlement cannot revive a stopped Worker", async () => {
 	const store = createStore();
 	store.dispatch({ type: "UPSERT_WORKER", worker: worker() });
-	let getCalls = 0;
-	let releaseLatest!: () => void;
-	let markLatestStarted!: () => void;
-	const latestStarted = new Promise<void>((resolve) => { markLatestStarted = resolve; });
-	const latest = new Promise<ReturnType<typeof response>>((resolve) => {
-		releaseLatest = () => resolve(liveAgent());
+	let markWaitStarted!: () => void;
+	const waitStarted = new Promise<void>((resolve) => { markWaitStarted = resolve; });
+	let releaseSettlement!: () => void;
+	const settlement = new Promise<ReturnType<typeof response>>((resolve) => {
+		releaseSettlement = () => resolve(liveAgent("idle"));
 	});
 	const pool = new HerdrWorkers({
 		pi: { exec: async (_command: string, args: string[]) => {
-			if (args[0] === "agent" && args[1] === "wait") return liveAgent("idle");
-			if (args[0] === "agent" && args[1] === "get") {
-				getCalls += 1;
-				if (getCalls === 2) {
-					markLatestStarted();
-					return latest;
-				}
-				return liveAgent();
+			if (args[0] === "agent" && args[1] === "wait") {
+				markWaitStarted();
+				return settlement;
 			}
+			if (args[0] === "agent" && args[1] === "get") return liveAgent();
 			return response({});
 		} } as never,
 		store,
@@ -1629,9 +1792,10 @@ test("a late settlement cannot revive a stopped Worker", async () => {
 		notifyMaster() {},
 	});
 	await pool.resume();
-	await latestStarted;
+	await waitStarted;
 	await pool.stop("worker-1");
-	releaseLatest();
+	// 结算晚于 stop 返回：不得把已休眠的子代理写回活跃态。
+	releaseSettlement();
 	await new Promise((resolve) => setTimeout(resolve, 0));
 	expect(store.state.workers[0]?.status).toBe("dormant");
 });
@@ -1658,13 +1822,20 @@ test("stop releases the tab but keeps or forgets the session by choice", async (
 	expect(store.state.workers).toEqual([]);
 });
 
+/** Pi 报到：上报的会话就是派发时预分配的那一个。 */
+function reportedAgent(store: MasterStore, paneId: string, tabId: string) {
+	const worker = store.state.workers.find((candidate) => candidate.paneId === paneId);
+	return agentResponse(paneId, tabId, worker?.sessionPath ?? "");
+}
+
+/** 空 sessionPath 代表 Pi 尚未报到：herdr 就绪判定早于 Pi 上报会话身份。 */
 function agentResponse(paneId: string, tabId: string, sessionPath: string) {
 	return response({
 		result: {
 			agent: {
 				pane_id: paneId,
 				tab_id: tabId,
-				agent_session: { kind: "path", value: sessionPath },
+				...(sessionPath ? { agent_session: { kind: "path", value: sessionPath } } : {}),
 			},
 		},
 	});

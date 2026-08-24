@@ -24,13 +24,6 @@ description: 个人 UI 库选型表：需要动效组件、canvas 特效、AI �
 - 无 llms.txt，文档是纯客户端渲染，选组件靠站点浏览。
 - 落地后按 ui-craft「弹簧与空间连续性」收口。
 
-### OriginKit — 文字动效 / 光标特效 / 图片画廊 / 背景动画（React / Framer）
-
-- 约 160 个免费动效组件：文字特效、光标特效、图片画廊、背景动画和 hero/features 等营销 sections；站点 [originkit.dev](https://www.originkit.dev)。
-- 获取：`npx originkit@latest add <compid>`（shadcn 式源码分发，落进 `components/originkit/`，deps 自动装，`add` 消耗账号 quota）；机读靠 MCP `https://mcp.originkit.dev/mcp`（list_components / get_component / search / fetch，可按 react/nextjs/vite 适配源码），无 llms.txt 和 registry.json。
-- 红线：产品处于 BETA；组件按 Framer 优先编写，React 侧落地后检查 Framer 绑定剥离干净（`"use client"`、no-op shim 无残留）。
-- 分工：Amicro 管卡片空间编排，Canvas UI 管 WebGL 覆盖交互 DOM，Paper Shaders 管纯背景纹理；文字/光标/画廊类动效归这里。
-
 ### Fluid Functionalism — 成品感产品 UI 组件（React / shadcn registry）
 
 - 23 个产品 UI 组件（Button、Dialog、Select、Tabs、Table 等）含 AI 聊天视觉件（ChatMessage、ThinkingIndicator、ThinkingSteps、AskUserQuestions）；设计理念是动效传达语义、hover 即预览，与 ui-craft 门禁契合。

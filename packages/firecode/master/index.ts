@@ -649,7 +649,7 @@ function compactWorker(worker: WorkerRef): Record<string, unknown> {
 		status: worker.status,
 		model: worker.model,
 		thinking: worker.thinking,
-		...(worker.sessionPath ? { session: worker.sessionPath } : {}),
+		session: worker.sessionPath,
 	};
 }
 

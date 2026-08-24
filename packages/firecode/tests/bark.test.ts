@@ -11,8 +11,15 @@ const worker = (status: string) => ({
 	status,
 	paneId: "p1",
 	tabId: "t1",
+	sessionPath: "/tmp/w1.jsonl",
 });
-const worker2 = (status: string) => ({ ...worker(status), name: "w2", paneId: "p2", tabId: "t2" });
+const worker2 = (status: string) => ({
+	...worker(status),
+	name: "w2",
+	paneId: "p2",
+	tabId: "t2",
+	sessionPath: "/tmp/w2.jsonl",
+});
 
 test("有工人待拍板时升 timeSensitive 并带副标题，否则 active 无副标题", () => {
 	const base = { title: "s", body: "b", group: "g", sessionId: "sid" };
@@ -30,9 +37,9 @@ test("hasBlockedWorker：blocked 为真；全忙、文件缺失、文件损坏�
 	const dir = await mkdtemp(join(tmpdir(), "firecode-bark-"));
 	try {
 		const path = join(dir, "state.json");
-		await writeFile(path, JSON.stringify({ version: 5, workers: [worker("working"), worker2("blocked")] }));
+		await writeFile(path, JSON.stringify({ version: 6, workers: [worker("working"), worker2("blocked")] }));
 		expect(hasBlockedWorker(path)).toBe(true);
-		await writeFile(path, JSON.stringify({ version: 5, workers: [worker("working")] }));
+		await writeFile(path, JSON.stringify({ version: 6, workers: [worker("working")] }));
 		expect(hasBlockedWorker(path)).toBe(false);
 		expect(hasBlockedWorker(join(dir, "missing.json"))).toBe(false);
 		await writeFile(path, "not json");

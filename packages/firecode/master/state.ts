@@ -2,6 +2,9 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
+/** 当前唯一可读的 Worker Pool 状态版本：不迁移、不兼容旧版。 */
+const STATE_VERSION = 6;
+
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type WorkerThinking = (typeof THINKING_LEVELS)[number];
 /** 注意：session/bark.ts 以 blocked 作为「待拍板」升档判据；新增其他等用户态时需同步扩展 hasBlockedWorker。 */
@@ -16,7 +19,8 @@ export interface WorkerRef {
 	status: WorkerStatus;
 	paneId?: string;
 	tabId?: string;
-	sessionPath?: string;
+	/** Pi 会话文件：派发时预分配（见 herdr.ts），档案是它唯一的事实源。 */
+	sessionPath: string;
 	/** 子代理 pane 的工作目录；仅显式指定时记录，休眠恢复沿用。 */
 	cwd?: string;
 	/** 中断时刻（epoch ms）：中断态的唯一标记，驱动续监、自动续跑与审查票 send 门禁豁免；只在接手（send/review/用户派活）时消耗。 */
@@ -29,7 +33,7 @@ export interface WorkerRef {
 }
 
 export interface MasterState {
-	version: 5;
+	version: typeof STATE_VERSION;
 	workers: WorkerRef[];
 }
 
@@ -39,7 +43,7 @@ export type MasterEvent =
 	| { type: "CLEAR" };
 
 export function initialMasterState(): MasterState {
-	return { version: 5, workers: [] };
+	return { version: STATE_VERSION, workers: [] };
 }
 
 export function reduceMaster(state: MasterState, event: MasterEvent): MasterState {
@@ -58,13 +62,23 @@ export function reduceMaster(state: MasterState, event: MasterEvent): MasterStat
 export function restoreMasterState(data: unknown): MasterState | undefined {
 	if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
 	const record = data as Record<string, unknown>;
-	if (record.version !== 5 || !Array.isArray(record.workers) || !record.workers.every(isWorker))
+	if (record.version !== STATE_VERSION || !Array.isArray(record.workers) || !record.workers.every(isWorker))
 		return undefined;
 	const workers = record.workers as WorkerRef[];
 	if (new Set(workers.map((worker) => worker.name)).size !== workers.length) return undefined;
-	const sessions = workers.flatMap((worker) => worker.sessionPath ? [worker.sessionPath] : []);
+	const sessions = workers.map((worker) => worker.sessionPath);
 	if (new Set(sessions).size !== sessions.length) return undefined;
-	return { version: 5, workers };
+	return { version: STATE_VERSION, workers };
+}
+
+/** 旧版状态：不迁移，由状态所有者（MasterStore）丢弃重建；只读调用方只看到错误，不产生副作用。 */
+export class LegacyMasterStateError extends Error {
+	constructor(version: number) {
+		super(
+			`Master Worker Pool 状态是旧版 v${version}（当前 v${STATE_VERSION}），不再读取；`
+			+ "重新启动指挥官模式会从空池重建，原有子代理已脱管，需要收编或手动清理",
+		);
+	}
 }
 
 export function masterStatePath(sessionId: string): string {
@@ -86,6 +100,8 @@ export function loadMasterState(path: string): MasterState | undefined {
 	} catch {
 		throw new Error(`Master Worker Pool 状态不是合法 JSON：${path}`);
 	}
+	const version = (data as { version?: unknown } | null)?.version;
+	if (typeof version === "number" && version !== STATE_VERSION) throw new LegacyMasterStateError(version);
 	const state = restoreMasterState(data);
 	if (!state) throw new Error(`Master Worker Pool 状态结构无效：${path}`);
 	return state;
@@ -98,7 +114,7 @@ export class MasterStore {
 
 	constructor(path: string, restored?: MasterState, onChange?: () => void) {
 		this.path = path;
-		this.stateValue = restored ?? loadMasterState(path) ?? initialMasterState();
+		this.stateValue = restored ?? discardLegacyState(path) ?? initialMasterState();
 		this.onChange = onChange;
 	}
 
@@ -128,6 +144,17 @@ export function requireWorker(state: MasterState, name: string): WorkerRef {
 	return worker;
 }
 
+/** 只有状态所有者能丢旧版文件：否则旧版会永久阻断激活，而只读旁路会抢先删掉告知依据。 */
+function discardLegacyState(path: string): MasterState | undefined {
+	try {
+		return loadMasterState(path);
+	} catch (error) {
+		if (!(error instanceof LegacyMasterStateError)) throw error;
+		rmSync(path, { force: true });
+		return undefined;
+	}
+}
+
 function writeState(path: string, state: MasterState): void {
 	mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
 	const temporary = `${path}.${process.pid}.${crypto.randomUUID()}.tmp`;
@@ -153,7 +180,8 @@ function isWorker(value: unknown): value is WorkerRef {
 		typeof record.name !== "string" || !/^[a-z][a-z0-9_-]{0,31}$/u.test(record.name) ||
 		typeof record.model !== "string" || !record.model ||
 		typeof record.thinking !== "string" || !THINKING_LEVELS.includes(record.thinking as WorkerThinking) ||
-		typeof record.status !== "string" || !isStatus(record.status)
+		typeof record.status !== "string" || !isStatus(record.status) ||
+		typeof record.sessionPath !== "string" || !record.sessionPath
 	) return false;
 	if (
 		record.reviewPreviousRunId !== undefined &&
@@ -166,7 +194,7 @@ function isWorker(value: unknown): value is WorkerRef {
 		return false;
 	if (record.disposition !== undefined && record.disposition !== "pending" && record.disposition !== "reminded")
 		return false;
-	if (record.status === "dormant") return typeof record.sessionPath === "string" && !!record.sessionPath;
+	if (record.status === "dormant") return true;
 	return typeof record.paneId === "string" && !!record.paneId && typeof record.tabId === "string" && !!record.tabId;
 }
 
