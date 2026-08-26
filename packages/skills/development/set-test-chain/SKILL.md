@@ -1,6 +1,6 @@
 ---
 name: set-test-chain
-description: 建立或改善验证链：设置最小测试入口、补高价值行为覆盖、清理触及范围的低价值测试并运行现有静态门。已有覆盖不新增用例；Bug 排查用 diagnosing-bugs，单纯跑测试不用。
+description: 建立或改善验证链：设置最小测试入口、补高价值行为覆盖、清理触及范围的低价值测试并运行现有静态门
 ---
 
 # Set Test Chain

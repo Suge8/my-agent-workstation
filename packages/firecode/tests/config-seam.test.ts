@@ -25,6 +25,7 @@ test("portable loader copies runtime sources without repository metadata or deve
 			"review/prompts/advisor.zh.md",
 			"review/prompts/review.en.md",
 			"review/prompts/review.zh.md",
+			"watcher/prompts/watch.zh.md",
 		]);
 	} finally {
 		await rm(directory, { recursive: true, force: true });
@@ -58,8 +59,8 @@ test("missing runtime config disables optional behavior and warns on each sessio
 		for (const handler of events.get("session_start") ?? [])
 			handler({}, { ui: { notify: (message: string) => warnings.push(message) } });
 	expect(warnings).toEqual([
-		"FireCode 配置：config.jsonc 不存在，已关闭可选功能",
-		"FireCode 配置：config.jsonc 不存在，已关闭可选功能",
+		"FireCode 配置有问题：config.jsonc 不存在，已关闭可选功能",
+		"FireCode 配置有问题：config.jsonc 不存在，已关闭可选功能",
 	]);
 });
 
@@ -77,6 +78,7 @@ test("runtime config enables only its declared behavior", async () => {
 			"bark",
 			"review",
 			"master",
+			"watcher",
 		].map((feature) => [feature, false]).concat([["rename", true]])),
 		keys: { rename: "alt+r" },
 	});
@@ -94,9 +96,14 @@ test("runtime config enables only its declared behavior", async () => {
 	expect(shortcuts).toEqual(["alt+r"]);
 });
 
-test("public config template is accepted by the runtime parser", async () => {
+test("公共配置模板可解析且认证相关功能安全关闭", async () => {
 	const configJsonc = await readFile(join(FIRECODE_DIR, "config.example.jsonc"), "utf8");
 	const { loadConfig } = await loadFirecodeModule("config.ts", { configJsonc });
+	const loaded = (loadConfig as () => { config: any; problems: string[] })();
 
-	expect((loadConfig as () => { problems: string[] })().problems).toEqual([]);
+	expect(loaded.problems).toEqual([]);
+	for (const feature of ["review", "master", "watcher", "bark"])
+		expect(loaded.config.features[feature]).toBeFalse();
+	expect(configJsonc).toContain("换成你有认证的模型");
+	expect(configJsonc).toContain("功能开关");
 });

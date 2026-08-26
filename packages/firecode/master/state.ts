@@ -2,14 +2,11 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-/** 当前唯一可读的 Worker Pool 状态版本：不迁移、不兼容旧版。 */
-const STATE_VERSION = 6;
+const STATE_VERSION = 7;
 
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type WorkerThinking = (typeof THINKING_LEVELS)[number];
-/** 注意：session/bark.ts 以 blocked 作为「待拍板」升档判据；新增其他等用户态时需同步扩展 hasBlockedWorker。 */
-export type WorkerStatus = "starting" | "working" | "blocked" | "idle" | "reviewing" | "dormant";
-/** 发落状态：落定类事件送达置 pending，提醒送达置 reminded，任一发落动作清除（ADR-0006）。 */
+export type WorkerStatus = "working" | "idle" | "reviewing";
 export type WorkerDisposition = "pending" | "reminded";
 
 export interface WorkerRef {
@@ -17,19 +14,11 @@ export interface WorkerRef {
 	model: string;
 	thinking: WorkerThinking;
 	status: WorkerStatus;
-	paneId?: string;
-	tabId?: string;
-	/** Pi 会话文件：派发时预分配（见 herdr.ts），档案是它唯一的事实源。 */
 	sessionPath: string;
-	/** 子代理 pane 的工作目录；仅显式指定时记录，休眠恢复沿用。 */
 	cwd?: string;
-	/** 中断时刻（epoch ms）：中断态的唯一标记，驱动续监、自动续跑与审查票 send 门禁豁免；只在接手（send/review/用户派活）时消耗。 */
 	interruptedAt?: number;
-	disposition?: WorkerDisposition;
-	/** review action 投递前观察到的 runId；null 表示当时没有审查。 */
-	reviewPreviousRunId?: string | null;
-	/** start/send 声明的审查意图：完成后由机器自动发起对抗审查，一次性消耗。 */
 	reviewNeeded?: boolean;
+	disposition?: WorkerDisposition;
 }
 
 export interface MasterState {
@@ -59,6 +48,16 @@ export function reduceMaster(state: MasterState, event: MasterEvent): MasterStat
 	}
 }
 
+export function recoverMasterState(state: MasterState, interruptedAt = Date.now()): MasterState {
+	let changed = false;
+	const workers = state.workers.map((worker) => {
+		if (worker.status === "idle") return worker;
+		changed = true;
+		return { ...worker, status: "idle" as const, interruptedAt };
+	});
+	return changed ? { ...state, workers } : state;
+}
+
 export function restoreMasterState(data: unknown): MasterState | undefined {
 	if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
 	const record = data as Record<string, unknown>;
@@ -66,17 +65,15 @@ export function restoreMasterState(data: unknown): MasterState | undefined {
 		return undefined;
 	const workers = record.workers as WorkerRef[];
 	if (new Set(workers.map((worker) => worker.name)).size !== workers.length) return undefined;
-	const sessions = workers.map((worker) => worker.sessionPath);
-	if (new Set(sessions).size !== sessions.length) return undefined;
+	if (new Set(workers.map((worker) => worker.sessionPath)).size !== workers.length) return undefined;
 	return { version: STATE_VERSION, workers };
 }
 
-/** 旧版状态：不迁移，由状态所有者（MasterStore）丢弃重建；只读调用方只看到错误，不产生副作用。 */
 export class LegacyMasterStateError extends Error {
-	constructor(version: number) {
+	constructor(readonly version: number) {
 		super(
 			`Master Worker Pool 状态是旧版 v${version}（当前 v${STATE_VERSION}），不再读取；`
-			+ "重新启动指挥官模式会从空池重建，原有子代理已脱管，需要收编或手动清理",
+			+ "重新启动指挥官模式会从空池重建，旧运行时进程不会纳入新池，需要手动清理",
 		);
 	}
 }
@@ -111,11 +108,17 @@ export class MasterStore {
 	private stateValue: MasterState;
 	private readonly path: string;
 	private readonly onChange?: () => void;
+	readonly discardedLegacyVersion?: number;
 
 	constructor(path: string, restored?: MasterState, onChange?: () => void) {
 		this.path = path;
-		this.stateValue = restored ?? discardLegacyState(path) ?? initialMasterState();
 		this.onChange = onChange;
+		if (restored) this.stateValue = restored;
+		else {
+			const loaded = this.loadOwnedState();
+			this.stateValue = loaded.state;
+			this.discardedLegacyVersion = loaded.discardedLegacyVersion;
+		}
 	}
 
 	get state(): MasterState {
@@ -128,31 +131,25 @@ export class MasterStore {
 		if (event.type === "CLEAR") rmSync(this.path, { force: true });
 		else writeState(this.path, next);
 		this.stateValue = next;
-		// 落盘成功后通知唯一消费者（状态栏投影）：UI 永远只反映已持久化的事实。
 		this.onChange?.();
 		return next;
 	}
-}
 
-export function liveWorkers(state: MasterState): WorkerRef[] {
-	return state.workers.filter((worker) => worker.status !== "dormant");
+	private loadOwnedState(): { state: MasterState; discardedLegacyVersion?: number } {
+		try {
+			return { state: loadMasterState(this.path) ?? initialMasterState() };
+		} catch (error) {
+			if (!(error instanceof LegacyMasterStateError)) throw error;
+			rmSync(this.path, { force: true });
+			return { state: initialMasterState(), discardedLegacyVersion: error.version };
+		}
+	}
 }
 
 export function requireWorker(state: MasterState, name: string): WorkerRef {
 	const worker = state.workers.find((candidate) => candidate.name === name);
 	if (!worker) throw new Error(`子代理不存在：${name}`);
 	return worker;
-}
-
-/** 只有状态所有者能丢旧版文件：否则旧版会永久阻断激活，而只读旁路会抢先删掉告知依据。 */
-function discardLegacyState(path: string): MasterState | undefined {
-	try {
-		return loadMasterState(path);
-	} catch (error) {
-		if (!(error instanceof LegacyMasterStateError)) throw error;
-		rmSync(path, { force: true });
-		return undefined;
-	}
 }
 
 function writeState(path: string, state: MasterState): void {
@@ -169,7 +166,12 @@ function writeState(path: string, state: MasterState): void {
 
 function upsertWorker(workers: WorkerRef[], worker: WorkerRef): WorkerRef[] {
 	const index = workers.findIndex((candidate) => candidate.name === worker.name);
+	const sessionOwner = workers.find((candidate) => candidate.sessionPath === worker.sessionPath);
+	if (sessionOwner && sessionOwner.name !== worker.name)
+		throw new Error(`sessionPath 已被占用：${worker.sessionPath}`);
 	if (index < 0) return [...workers, worker];
+	if (workers[index].sessionPath !== worker.sessionPath)
+		throw new Error(`子代理 ${worker.name} 不能更换 sessionPath`);
 	return workers.map((candidate, position) => (position === index ? worker : candidate));
 }
 
@@ -183,22 +185,15 @@ function isWorker(value: unknown): value is WorkerRef {
 		typeof record.status !== "string" || !isStatus(record.status) ||
 		typeof record.sessionPath !== "string" || !record.sessionPath
 	) return false;
-	if (
-		record.reviewPreviousRunId !== undefined &&
-		record.reviewPreviousRunId !== null &&
-		typeof record.reviewPreviousRunId !== "string"
-	) return false;
-	if (record.reviewNeeded !== undefined && typeof record.reviewNeeded !== "boolean") return false;
 	if (record.cwd !== undefined && (typeof record.cwd !== "string" || !record.cwd)) return false;
 	if (record.interruptedAt !== undefined && (typeof record.interruptedAt !== "number" || record.interruptedAt <= 0))
 		return false;
+	if (record.reviewNeeded !== undefined && typeof record.reviewNeeded !== "boolean") return false;
 	if (record.disposition !== undefined && record.disposition !== "pending" && record.disposition !== "reminded")
 		return false;
-	if (record.status === "dormant") return true;
-	return typeof record.paneId === "string" && !!record.paneId && typeof record.tabId === "string" && !!record.tabId;
+	return true;
 }
 
 function isStatus(value: string): value is WorkerStatus {
-	return value === "starting" || value === "working" || value === "blocked" || value === "idle"
-		|| value === "reviewing" || value === "dormant";
+	return value === "working" || value === "idle" || value === "reviewing";
 }

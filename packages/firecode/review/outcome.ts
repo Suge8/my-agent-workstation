@@ -2,8 +2,7 @@ import { readFileSync } from "node:fs";
 import { CHECKPOINT_TYPE, isValidCheckpoint } from "./checkpoint.js";
 import type { ReviewState } from "./state.js";
 
-/** 审查活跃期在 herdr:blocked 频道发布的占用标签；外部（Master）据此区分
- * 「审查占用」与「Worker 真在提问」，本模块是跨模块接缝，故常量定在这里。 */
+/** 审查活跃期在 herdr:blocked 频道发布的展示标签。 */
 export const REVIEW_OCCUPANCY_LABEL = "对抗审查进行中";
 
 export type ReviewOutcome =
@@ -26,8 +25,8 @@ export function readReviewOutcome(sessionPath: string): ReviewOutcome {
 
 	let latest: ReviewState | undefined;
 	let damage: string | undefined;
-	// 与 master/herdr.ts 的 readLatestAssistant 一致：session 尾行可能正写到一半，
-	// 跳过损坏行并保留最近一条可验证记录，不能让截断尾行抹掉已有结果。
+	// session 尾行可能正写到一半；跳过损坏行并保留最近一条可验证记录，
+	// 不能让截断尾行抹掉已有结果。
 	for (const [index, line] of content.split(/\r?\n/u).entries()) {
 		if (!line.trim()) continue;
 		let entry: unknown;

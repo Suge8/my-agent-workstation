@@ -1,6 +1,6 @@
 ---
 name: ui-craft
-description: 设计、重设计和打磨网站与产品 UI：整体方向、布局、响应式、控件、反馈、空态、排版、配色、动效、文案与无障碍；也承接 better-ui/colors/typography/accessibility。
+description: 设计和打磨 UI 原则
 ---
 
 # UI Craft

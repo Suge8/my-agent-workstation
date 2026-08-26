@@ -1,6 +1,7 @@
 ---
 name: stop-slop
-description: 去除草稿或成稿中的套话、机械结构和可预测 AI 写作痕迹；营销转化文案用 copywriting。
+disable-model-invocation: true
+description: 去除草稿或成稿中的套话、机械结构和可预测 AI 写作痕迹
 metadata:
   trigger: Writing prose, editing drafts, reviewing content for AI patterns
 ---

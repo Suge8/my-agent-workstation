@@ -1,5 +1,6 @@
 ---
-status: accepted
+status: superseded
+superseded_by: 0009-in-process-runtime-replaces-herdr
 ---
 
 # 工人保持 herdr 分布式进程，不改进程内子代理

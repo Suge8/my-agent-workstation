@@ -428,6 +428,8 @@ describe("prompt assembly", () => {
 			details: "FAIL\n发现 x",
 			advisor: { verdict: "continue", advice: "继续修" },
 		});
+		expect(feedback.startsWith("<firecode_review>\n")).toBe(true);
+		expect(feedback.endsWith("\n</firecode_review>")).toBe(true);
 		expect(feedback).toContain("待核实假设");
 		expect(feedback).toContain("发现 x");
 		expect(feedback).toContain("继续修");

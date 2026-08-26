@@ -11,6 +11,7 @@ import {
 	fitMetadataLine,
 	fitStatusLine,
 	reviewStatus,
+	statusBadges,
 	latestCacheHitPercent,
 	renderCache,
 	renderContext,
@@ -20,7 +21,8 @@ import {
 } from "./render.js";
 import { type TpsStatus, registerTps } from "./tps.js";
 
-export function registerStatusBar(pi: ExtensionAPI): void {
+export function registerStatusBar(pi: ExtensionAPI, subsession = false): void {
+	if (subsession) return;
 	let quota: QuotaStatus | undefined;
 	let tpsStatus: TpsStatus | undefined;
 	let requestRender = () => {};
@@ -97,7 +99,7 @@ export function registerStatusBar(pi: ExtensionAPI): void {
 					);
 					return [
 						alignRight(
-							fitMetadataLine(location, title, width, separator, statuses.get("master") ?? ""),
+							fitMetadataLine(location, title, width, separator, statusBadges(statuses, separator)),
 							review,
 							width,
 						),

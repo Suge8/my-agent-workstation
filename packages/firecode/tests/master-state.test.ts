@@ -1,182 +1,111 @@
-import { afterAll, expect, test } from "bun:test";
+import { expect, test } from "bun:test";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { MasterConfig, MasterModel } from "../config.js";
-import { masterEventDetails } from "../master/event-format.js";
 import {
+	LegacyMasterStateError,
 	MasterStore,
 	initialMasterState,
 	loadMasterState,
+	recoverMasterState,
 	reduceMaster,
 	restoreMasterState,
+	type WorkerRef,
 } from "../master/state.js";
-import { cleanupFirecodeModules, loadFirecodeModule } from "./loader.ts";
 
-const configModule = await loadFirecodeModule("config.js") as {
-	parseMasterConfig(raw: Record<string, unknown>, problems: string[]): MasterConfig;
+const worker: WorkerRef = {
+	name: "worker-1",
+	model: "test/worker",
+	thinking: "medium",
+	status: "working",
+	sessionPath: "/tmp/subagents/worker-1.jsonl",
 };
-const { parseMasterConfig } = configModule;
-afterAll(cleanupFirecodeModules);
 
-test("master 节省略时不注入公开默认花名册", () => {
-	const problems: string[] = [];
-	expect(parseMasterConfig({}, problems).models).toEqual([]);
-	expect(problems).toEqual([]);
+test("v7 只恢复三种状态及合法标记", () => {
+	for (const status of ["working", "idle", "reviewing"] as const) {
+		const candidate = {
+			...worker,
+			status,
+			interruptedAt: 1_700_000_000_000,
+			reviewNeeded: true,
+			disposition: "pending" as const,
+		};
+		expect(restoreMasterState({ version: 7, workers: [candidate] })).toEqual({ version: 7, workers: [candidate] });
+	}
+	for (const status of ["starting", "blocked", "dormant"])
+		expect(restoreMasterState({ version: 7, workers: [{ ...worker, status }] })).toBeUndefined();
+	expect(restoreMasterState({ version: 6, workers: [worker] })).toBeUndefined();
+	expect(restoreMasterState({ version: 7, workers: [{ ...worker, interruptedAt: 0 }] })).toBeUndefined();
+	expect(restoreMasterState({ version: 7, workers: [{ ...worker, disposition: "done" }] })).toBeUndefined();
 });
 
-test("master 节未知字段、模型重复与缺失 model 都报配置问题", () => {
-	const problems: string[] = [];
-	const parsed = parseMasterConfig(
-		{
-			typo: true,
-			models: [
-				{ model: "openai-codex/gpt-5.6-sol", extra: 1 },
-				{ thinking: "nope" },
-				{ model: "openai-codex/gpt-5.6-sol" },
-			],
-		},
-		problems,
-	);
-	expect(parsed.models[0]).toEqual({
-		model: "openai-codex/gpt-5.6-sol",
-		thinking: "medium",
-		use: "通用",
+test("状态归约保留并按发落动作消除中断、审查义务与发落标记", () => {
+	let state = reduceMaster(initialMasterState(), { type: "UPSERT_WORKER", worker });
+	state = reduceMaster(state, {
+		type: "UPSERT_WORKER",
+		worker: { ...worker, status: "idle", interruptedAt: 42, reviewNeeded: true, disposition: "pending" },
 	});
-	expect(problems).toEqual([
-		"未知字段 master.typo",
-		"未知字段 master.models[0].extra",
-		"master.models[1].model 必须是非空字符串",
-		"master.models[1].thinking 值无效",
-		"master.models 模型不能重复",
+	expect(state.workers[0]).toMatchObject({ status: "idle", interruptedAt: 42, reviewNeeded: true, disposition: "pending" });
+	state = reduceMaster(state, {
+		type: "UPSERT_WORKER",
+		worker: { ...worker, status: "reviewing", reviewNeeded: true },
+	});
+	expect(state.workers[0]).toEqual({ ...worker, status: "reviewing", reviewNeeded: true });
+	state = reduceMaster(state, { type: "REMOVE_WORKER", name: worker.name });
+	expect(state.workers).toEqual([]);
+});
+
+test("恢复时在飞状态转为带中断标记的冷 idle，已落定状态不变", () => {
+	const state = {
+		version: 7 as const,
+		workers: [
+			worker,
+			{ ...worker, name: "review", sessionPath: "/tmp/subagents/review.jsonl", status: "reviewing" as const, reviewNeeded: true },
+			{ ...worker, name: "idle", sessionPath: "/tmp/subagents/idle.jsonl", status: "idle" as const },
+		],
+	};
+	const recovered = recoverMasterState(state, 1234);
+	expect(recovered.workers).toEqual([
+		{ ...worker, status: "idle", interruptedAt: 1234 },
+		{ ...worker, name: "review", sessionPath: "/tmp/subagents/review.jsonl", status: "idle", reviewNeeded: true, interruptedAt: 1234 },
+		{ ...worker, name: "idle", sessionPath: "/tmp/subagents/idle.jsonl", status: "idle" },
 	]);
 });
 
-test("紧凑行提取：标题+正文首句预览，无标记行退化纯标题", () => {
-	// 标记词汇的事实源在 event-format（herdr 产文与提取共用同一常量），此处只锁提取规则本身；
-	// 真实产文→提取的端到端断言见 master-herdr-recovery 的落定流用例。
-	expect(masterEventDetails([
-		"Worker t 已停下\n回复：\nPR #603 就绪。\n细节……",
-		"Worker x 审查结束：通过（2 轮）\n最终回复：\n\n**现场已恢复**",
-		"提醒：Worker x 的落定消息未处置\nsend 继续派活。",
-	])).toEqual({
-		version: 1,
-		titles: [
-			"Worker t 已停下 — PR #603 就绪。",
-			"Worker x 审查结束：通过（2 轮） — **现场已恢复**",
-			"提醒：Worker x 的落定消息未处置",
-		],
-	});
+test("重名身份漂移与重复 sessionPath 均拒绝", () => {
+	const state = reduceMaster(initialMasterState(), { type: "UPSERT_WORKER", worker });
+	expect(() => reduceMaster(state, {
+		type: "UPSERT_WORKER",
+		worker: { ...worker, sessionPath: "/tmp/subagents/other.jsonl" },
+	})).toThrow("不能更换 sessionPath");
+	expect(() => reduceMaster(state, {
+		type: "UPSERT_WORKER",
+		worker: { ...worker, name: "worker-2" },
+	})).toThrow("sessionPath 已被占用");
+	expect(restoreMasterState({ version: 7, workers: [worker, worker] })).toBeUndefined();
+	expect(restoreMasterState({ version: 7, workers: [worker, { ...worker, name: "worker-2" }] })).toBeUndefined();
 });
 
-const dormant = {
-	name: "worker-1",
-	model: "openai-codex/gpt-5.6-sol",
-	thinking: "medium" as const,
-	status: "dormant" as const,
-	sessionPath: "/tmp/worker.jsonl",
-};
-
-test("restore rejects malformed identities, duplicate Pi sessions and foreign versions", () => {
-	expect(restoreMasterState({ version: 5, workers: [dormant] })).toBeUndefined();
-	// 会话路径是派发时预分配的身份，任何状态都不得缺失。
-	expect(restoreMasterState({
-		version: 6,
-		workers: [{ ...dormant, sessionPath: undefined, status: "working", paneId: "w1:p2", tabId: "w1:t2" }],
-	})).toBeUndefined();
-	expect(restoreMasterState({ version: 6, workers: [{ ...dormant, status: "closed" }] })).toBeUndefined();
-	expect(restoreMasterState({ version: 6, workers: [{ ...dormant, thinking: "huge" }] })).toBeUndefined();
-	expect(restoreMasterState({ version: 6, workers: [dormant, dormant] })).toBeUndefined();
-	expect(restoreMasterState({
-		version: 6,
-		workers: [dormant, { ...dormant, name: "worker-2" }],
-	})).toBeUndefined();
-	expect(restoreMasterState({ version: 6, workers: [dormant] })).toEqual({ version: 6, workers: [dormant] });
-	const blocked = { ...dormant, status: "blocked", paneId: "w1:p2", tabId: "w1:t2" };
-	expect(restoreMasterState({ version: 6, workers: [blocked] })).toEqual({ version: 6, workers: [blocked] });
-	const reviewing = { ...blocked, status: "reviewing" };
-	expect(restoreMasterState({ version: 6, workers: [reviewing] })).toEqual({ version: 6, workers: [reviewing] });
-});
-
-test("cwd/interruptedAt/disposition 类型错误拒绝，合法值保留", () => {
-	expect(restoreMasterState({ version: 6, workers: [{ ...dormant, cwd: "" }] })).toBeUndefined();
-	expect(restoreMasterState({ version: 6, workers: [{ ...dormant, interruptedAt: -1 }] })).toBeUndefined();
-	expect(restoreMasterState({ version: 6, workers: [{ ...dormant, disposition: "nagged" }] })).toBeUndefined();
-	const interrupted = {
-		...dormant,
-		status: "idle",
-		paneId: "w1:p2",
-		tabId: "w1:t2",
-		cwd: "/tmp/checkout",
-		interruptedAt: 1700000000000,
-		disposition: "pending",
-	};
-	expect(restoreMasterState({ version: 6, workers: [interrupted] })).toEqual({ version: 6, workers: [interrupted] });
-});
-
-test("Worker Pool state atomically overwrites one file instead of appending session entries", async () => {
-	const directory = await mkdtemp(join(tmpdir(), "firecode-master-state-"));
+test("v6 只读报旧版错误，状态所有者丢弃并记录清理告知依据", async () => {
+	const directory = await mkdtemp(join(tmpdir(), "firecode-master-v7-"));
 	const path = join(directory, "state.json");
+	await writeFile(path, JSON.stringify({ version: 6, workers: [worker] }));
+	expect(() => loadMasterState(path)).toThrow(LegacyMasterStateError);
 	const store = new MasterStore(path);
-	for (let index = 1; index <= 20; index += 1) {
-		store.dispatch({
-			type: "UPSERT_WORKER",
-			worker: { ...dormant, name: `worker-${index}`, sessionPath: `/tmp/worker-${index}.jsonl` },
-		});
-	}
-	expect(await readdir(directory)).toEqual(["state.json"]);
-	expect(JSON.parse(await readFile(path, "utf8")).workers).toHaveLength(20);
-	expect(loadMasterState(path)?.workers).toHaveLength(20);
-	store.dispatch({ type: "CLEAR" });
+	expect(store.state).toEqual(initialMasterState());
+	expect(store.discardedLegacyVersion).toBe(6);
 	expect(await readdir(directory)).toEqual([]);
 	await rm(directory, { recursive: true, force: true });
 });
 
-test("store 变更后通知消费者，无变化的 dispatch 不通知", async () => {
-	const directory = await mkdtemp(join(tmpdir(), "firecode-master-onchange-"));
+test("Worker Pool 以 0600 原子覆盖唯一状态文件", async () => {
+	const directory = await mkdtemp(join(tmpdir(), "firecode-master-state-"));
 	const path = join(directory, "state.json");
-	let notified = 0;
-	const store = new MasterStore(path, undefined, () => { notified += 1; });
-	store.dispatch({ type: "UPSERT_WORKER", worker: dormant });
-	expect(notified).toBe(1);
-	// reducer 短路的无变化事件：不落盘、不通知。
-	store.dispatch({ type: "REMOVE_WORKER", name: "no-such-worker" });
-	expect(notified).toBe(1);
-	store.dispatch({ type: "UPSERT_WORKER", worker: { ...dormant, status: "idle", paneId: "w1:p2", tabId: "w1:t2" } });
-	expect(notified).toBe(2);
-	await rm(directory, { recursive: true, force: true });
-});
-
-test("a corrupt current state fails closed instead of reviving an older snapshot", async () => {
-	const directory = await mkdtemp(join(tmpdir(), "firecode-master-corrupt-"));
-	const path = join(directory, "state.json");
-	await writeFile(path, "not-json");
-	expect(() => loadMasterState(path)).toThrow("不是合法 JSON");
-	await rm(directory, { recursive: true, force: true });
-});
-
-test("旧版状态：只读调用方只拿到错误，状态所有者丢弃后从空池重建", async () => {
-	const directory = await mkdtemp(join(tmpdir(), "firecode-master-legacy-"));
-	const path = join(directory, "state.json");
-	await writeFile(path, JSON.stringify({ version: 5, workers: [{ ...dormant, sessionPath: "/tmp/legacy.jsonl" }] }));
-	// 只读旁路（bark 等）不得删文件：否则会抢先删掉 Master 的告知依据。
-	expect(() => loadMasterState(path)).toThrow("旧版 v5");
-	expect(() => loadMasterState(path)).toThrow("旧版 v5");
-	// 不迁移也不永久阻断：所有者丢弃旧文件，从空池重建并落盘当前版本。
 	const store = new MasterStore(path);
-	expect(store.state.workers).toEqual([]);
-	store.dispatch({ type: "UPSERT_WORKER", worker: dormant });
-	expect(loadMasterState(path)?.workers).toHaveLength(1);
+	store.dispatch({ type: "UPSERT_WORKER", worker });
+	expect(await readdir(directory)).toEqual(["state.json"]);
+	expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ version: 7, workers: [worker] });
+	store.dispatch({ type: "CLEAR" });
+	expect(await readdir(directory)).toEqual([]);
 	await rm(directory, { recursive: true, force: true });
-});
-
-test("reducer records reviewing and removes forgotten Workers", () => {
-	let state = reduceMaster(initialMasterState(), { type: "UPSERT_WORKER", worker: dormant });
-	state = reduceMaster(state, {
-		type: "UPSERT_WORKER",
-		worker: { ...dormant, status: "reviewing", paneId: "w1:p2", tabId: "w1:t2" },
-	});
-	expect(state).toMatchObject({ version: 6, workers: [{ status: "reviewing" }] });
-	state = reduceMaster(state, { type: "REMOVE_WORKER", name: "worker-1" });
-	expect(state.workers).toEqual([]);
 });

@@ -1,6 +1,6 @@
 ---
 name: better-computer-use
-description: "读取和操作 macOS、Windows 桌面 UI：任务涉及桌面应用的查看、点击、输入、窗口管理时使用，也响应用户直接说 bcu。任务不涉及 GUI 时不用；站点开发诊断用 flow-browser-use。"
+description: "读取和操作 macOS、Windows 桌面 UI：任务涉及桌面应用的查看、点击、输入、窗口管理时使用"
 ---
 
 # Better Computer Use 桌面操作

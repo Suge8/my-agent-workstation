@@ -1,5 +1,6 @@
 ---
-status: accepted
+status: superseded
+superseded_by: 0009-in-process-runtime-replaces-herdr
 ---
 
 # 经 Herdr 从外部发起 Worker 审查

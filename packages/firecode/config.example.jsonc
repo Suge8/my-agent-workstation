@@ -1,30 +1,99 @@
 {
-	// Copy to the Pi Agent directory at extensions/firecode/config.jsonc, then restart Pi.
-	// The template enables only local UI and session conveniences. Turn on provider,
-	// notification, review, and delegation features after configuring their requirements.
+	// 复制到 Pi Agent 目录的 extensions/firecode/config.jsonc，按需修改后重启 Pi。
+	// 所有模型示例都使用 Pi 内置 provider；请换成你有认证的模型，再开启会真实调用模型的功能。
+
+	// 功能开关。纯本地界面与会话功能默认开启；依赖个人认证、通知地址或会产生额外模型调用的功能默认关闭。
 	"features": {
-		"header": true,
-		"statusbar": true,
-		"tools": true,
-		"presets": true,
-		"rename": true,
-		"stats": true,
-		"claudeSub": false,
-		"openaiNative": false,
-		"workingFlame": true,
-		"bark": false,
-		"review": false,
-		"master": false
+		"header": true, // 会话启动横幅
+		"statusbar": true, // 底部状态栏
+		"tools": true, // read/bash/edit/write 工具行渲染
+		"presets": true, // 模型与思考档预设
+		"rename": true, // /rename 会话重命名
+		"stats": true, // /tokens 用量统计
+		"claudeSub": false, // Anthropic OAuth 归因头；需对应订阅认证
+		"openaiNative": false, // OpenAI 请求层增强；需对应 provider 认证
+		"workingFlame": true, // 工作回合火焰
+		"bark": false, // Bark 推送；需在 ~/.pi/agent/bark-key 配置地址
+		"review": false, // /fire-review；会调用下方审查模型
+		"master": false, // /fire-master；会调用下方子代理模型
+		"watcher": false // /fire-watch；会在主会话回合后调用观察模型
 	},
+
+	// 快捷键在启动时绑定，修改后需重启 Pi。
 	"keys": {
-		"rename": "ctrl+r",
-		"cyclePreset": "ctrl+shift+u",
-		"fast": "ctrl+f"
+		"rename": "ctrl+shift+r", // 重命名当前会话
+		"cyclePreset": "ctrl+shift+p", // 轮换下方 presets
+		"fast": "ctrl+shift+f" // 切换当前 provider 的 priority 加速档
 	},
-	"presets": {
-		"deep": {
-			"thinkingLevel": "high",
-			"key": "alt+1"
+
+	// OpenAI 系 provider 的请求选项，仅 features.openaiNative=true 时生效。
+	// nativeCompaction 使用 OpenAI 原生上下文压缩；priority 通常会提高费用。
+	"openai": {
+		"nativeCompaction": false,
+		"providers": {
+			"openai-codex": { "textVerbosity": "low", "priority": false },
+			"xai": { "priority": false }
 		}
+	},
+
+	// 预设字段均可选：provider/model/thinkingLevel/tools/instructions/key。
+	// 示例 provider 是内置 provider；模型名请换成你有认证的模型。未写 key 的预设只通过 /preset 使用。
+	"presets": {
+		"focused": {
+			"provider": "anthropic",
+			"model": "claude-haiku-4-5",
+			"thinkingLevel": "medium",
+			"tools": ["read", "bash", "edit", "write"],
+			"instructions": "先核实需求，再做最小改动。",
+			"key": "alt+p"
+		},
+		"quick": {
+			"provider": "openai-codex",
+			"model": "gpt-5.1-codex-mini",
+			"thinkingLevel": "low"
+		}
+	},
+
+	// 观察员在每个主会话回合后评估增量。裸 /fire-watch 只翻转当前会话，不修改本配置。
+	// model 必须来自内置 provider；请换成你有认证的模型。minimal 省略推理和写入正文，full 保留完整增量。
+	"watcher": {
+		"enabled": false, // 新会话默认状态；features.watcher 开启后仍可保持手动启用
+		"model": "anthropic/claude-haiku-4-5",
+		"thinking": "low",
+		"context": "minimal"
+	},
+
+	// 指挥官按 models 选型表派子代理。裸 /fire-master 只翻转当前会话，status 查看当前池。
+	// 每个 model 都应换成你有认证的模型；use 会注入指挥官提示词，写清适用场景。
+	"master": {
+		"autoActivate": false, // 新会话是否自动开启指挥官模式
+		"workerExcludeExtensions": [], // 子代理不加载的扩展完整路径或文件名
+		"models": [
+			{
+				"model": "openai-codex/gpt-5.1-codex-mini",
+				"thinking": "medium",
+				"use": "常规实现与调试"
+			},
+			{
+				"model": "anthropic/claude-haiku-4-5",
+				"thinking": "low",
+				"use": "等待、检索与轻量调查"
+			}
+		]
+	},
+
+	// 对抗审查并行调用 reviewers；连续失败达到 advisorAfterFailures 后由 advisor 仲裁。
+	// 所有模型都应换成你有认证的模型。tools 是审查会话的只读工具白名单；bash 用于运行验证。
+	"review": {
+		"advisor": { "model": "anthropic/claude-sonnet-4-5", "thinking": "high" },
+		"reviewers": [
+			{ "model": "anthropic/claude-haiku-4-5", "thinking": "medium" },
+			{ "model": "openai-codex/gpt-5.1-codex-mini", "thinking": "medium" }
+		],
+		"maxRounds": 3, // 审查轮数硬上限，范围 1–10
+		"advisorAfterFailures": 2, // 连续失败多少轮后调用顾问，范围 1–5
+		"timeoutMinutes": 20, // 单个审查者或顾问的超时分钟数，范围 1–60
+		"tools": ["read", "grep", "find", "ls", "bash"],
+		"language": "zh" // 审查反馈语言：zh 或 en
 	}
 }

@@ -27,7 +27,9 @@ function piPackagesDirectory(): string {
 const PI_PACKAGES = piPackagesDirectory();
 export const PI_CODING_AGENT_URL = pathToFileURL(join(PI_PACKAGES, "coding-agent/src/index.ts")).href;
 const PI_CODING_AGENT = PI_CODING_AGENT_URL;
-const PI_AI = pathToFileURL(join(PI_PACKAGES, "ai/src/index.ts")).href;
+export const PI_AI_URL = pathToFileURL(join(PI_PACKAGES, "ai/src/index.ts")).href;
+export const PI_AI_COMPAT_URL = pathToFileURL(join(PI_PACKAGES, "ai/src/compat.ts")).href;
+const PI_AI = PI_AI_URL;
 const PI_TUI = pathToFileURL(join(PI_PACKAGES, "tui/src/index.ts")).href;
 
 const created: string[] = [];
@@ -39,7 +41,6 @@ export const TEST_REVIEW_CONFIG = {
 	advisorAfterFailures: 2,
 	timeoutMinutes: 1,
 	tools: ["read", "bash"],
-	background: { command: "pi" },
 	language: "zh",
 };
 const TEST_CONFIG_JSONC = JSON.stringify({
@@ -70,7 +71,7 @@ export async function copyFirecodeSource(destination: string): Promise<void> {
 			const [root] = path.split(sep);
 			if (NON_RUNTIME_ROOTS.has(root)) return false;
 			if (![".md", ".mdx"].includes(extname(path))) return true;
-			return path.startsWith(`review${sep}prompts${sep}`);
+			return path.startsWith(`review${sep}prompts${sep}`) || path.startsWith(`watcher${sep}prompts${sep}`);
 		},
 	});
 }

@@ -1,6 +1,7 @@
 ---
 name: gpt-image
-description: 通过本地 Codex 订阅生成 PNG 图片、海报、插图或 Logo。
+disable-model-invocation: true
+description: 通过 gptimage 模型生成优美 AI 图片、海报、插图或 Logo
 ---
 
 # GPT Image

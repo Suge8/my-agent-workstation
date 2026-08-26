@@ -2,37 +2,29 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { cleanupFirecodeModules, loadFirecodeModule } from "./loader.ts";
 
 type ParseReview = typeof import("../review/reviewer.js").parseReviewOutput;
-type ReviewerArgs = typeof import("../review/reviewer.js").reviewerArgs;
 type Verdict = typeof import("../review/reviewer.js").verdictOf;
 type ParseAdvisor = typeof import("../review/advisor.js").parseAdvisorOutput;
-type AdvisorArgs = typeof import("../review/advisor.js").advisorArgs;
 type BuildEvidence = typeof import("../review/evidence.js").buildEvidence;
 
 let parseReview: ParseReview;
-let reviewerArgs: ReviewerArgs;
 let verdictOf: Verdict;
 let parseAdvisor: ParseAdvisor;
-let advisorArgs: AdvisorArgs;
 let buildEvidence: BuildEvidence;
 
 async function loadAll() {
 	const review = (await loadFirecodeModule("review/reviewer.js")) as {
 		parseReviewOutput: ParseReview;
-		reviewerArgs: ReviewerArgs;
 		verdictOf: Verdict;
 	};
 	const advisor = (await loadFirecodeModule("review/advisor.js")) as {
 		parseAdvisorOutput: ParseAdvisor;
-		advisorArgs: AdvisorArgs;
 	};
 	const evidence = (await loadFirecodeModule("review/evidence.js")) as {
 		buildEvidence: BuildEvidence;
 	};
 	parseReview = review.parseReviewOutput;
-	reviewerArgs = review.reviewerArgs;
 	verdictOf = review.verdictOf;
 	parseAdvisor = advisor.parseAdvisorOutput;
-	advisorArgs = advisor.advisorArgs;
 	buildEvidence = evidence.buildEvidence;
 }
 
@@ -51,42 +43,6 @@ function finding(issue: string) {
 afterEach(cleanupFirecodeModules);
 
 describe("PASS/FAIL output contract", () => {
-	test("review subprocess isolates its system policy from session evidence", async () => {
-		await loadAll();
-		const args = reviewerArgs(
-			{
-				model: "provider/model",
-				thinking: "high",
-				command: "pi",
-				tools: ["read", "bash"],
-				timeoutMs: 1_000,
-			},
-			{ system: "review policy", user: "session evidence" },
-		);
-		for (const argument of [
-			"--system-prompt",
-			"review policy",
-			"--no-extensions",
-			"--no-skills",
-			"--no-prompt-templates",
-			"--no-context-files",
-		]) expect(args).toContain(argument);
-		expect(args.at(-1)).toBe("session evidence");
-		const arbitration = advisorArgs(
-			{
-				model: "provider/advisor",
-				thinking: "high",
-				command: "pi",
-				tools: ["read", "bash"],
-				timeoutMs: 1_000,
-			},
-			{ system: "advisor policy", user: "findings" },
-		);
-		expect(arbitration).toContain("--system-prompt");
-		expect(arbitration).toContain("--no-context-files");
-		expect(arbitration.at(-1)).toBe("findings");
-	});
-
 	test("verdictOf tolerates markdown bold around the verdict", async () => {
 		await loadAll();
 		expect(verdictOf("PASS")).toBe("PASS");
@@ -209,22 +165,17 @@ describe("advisor verdict parsing", () => {
 		}
 	});
 
-	test("advisor subprocess failure is infrastructure error, not continue", async () => {
+	test("advisor session failure is infrastructure error, not continue", async () => {
 		const { runAdvisor } = (await loadFirecodeModule("review/advisor.js")) as {
 			runAdvisor: (options: Record<string, unknown>) => Promise<unknown>;
 		};
 		await expect(runAdvisor({
-			config: {
-				command: "/definitely/missing/firecode-reviewer",
-				model: "p/m",
-				thinking: "low",
-				tools: [],
-				timeoutMs: 1_000,
-			},
+			config: { model: "p/m", thinking: "low", tools: [], timeoutMs: 1_000 },
 			prompt: { system: "policy", user: "input" },
 			cwd: process.cwd(),
 			language: "zh",
-		})).rejects.toThrow("顾问子进程不可用");
+			runSession: async () => ({ kind: "error", message: "auth failed" }),
+		})).rejects.toThrow("顾问会话不可用");
 	});
 });
 
@@ -441,12 +392,9 @@ describe("FAIL output contract", () => {
 });
 
 describe("review config strictness", () => {
-	test("reports nested unknown keys and type errors instead of silently defaulting", async () => {
+	test("reports unknown keys and type errors instead of silently defaulting", async () => {
 		const { parseReviewConfig } = (await loadFirecodeModule("config.js")) as {
-			parseReviewConfig: (
-				raw: Record<string, unknown>,
-				problems: string[],
-			) => { tools: string[]; background: { command: string } };
+			parseReviewConfig: (raw: Record<string, unknown>, problems: string[]) => { tools: string[] };
 		};
 		const problems: string[] = [];
 		parseReviewConfig(
@@ -460,11 +408,11 @@ describe("review config strictness", () => {
 		);
 		expect(problems).toContain("未知字段 review.advisor.thinkig");
 		expect(problems).toContain("未知字段 review.reviewers[0].extra");
-		expect(problems).toContain("未知字段 review.background.cmd");
+		expect(problems).toContain("review.background 已随审查子进程层删除，请直接移除该键");
 		expect(problems).toContain("review.tools 必须是字符串数组");
 	});
 
-	test("empty required collections and nested command are rejected", async () => {
+	test("empty required tool collection is rejected", async () => {
 		const { parseReviewConfig } = (await loadFirecodeModule("config.js")) as {
 			parseReviewConfig: (raw: Record<string, unknown>, problems: string[]) => unknown;
 		};
@@ -477,13 +425,11 @@ describe("review config strictness", () => {
 				advisorAfterFailures: 2,
 				timeoutMinutes: 20,
 				tools: [],
-				background: {},
 				language: "zh",
 			},
 			problems,
 		);
 		expect(problems).toContain("review.tools 必须是非空字符串数组");
-		expect(problems).toContain("review.background.command 必须是非空字符串");
 	});
 
 	test("a fully valid review section reports no problems", async () => {
@@ -499,7 +445,6 @@ describe("review config strictness", () => {
 				advisorAfterFailures: 2,
 				timeoutMinutes: 20,
 				tools: ["read", "bash"],
-				background: { command: "pi" },
 				language: "zh",
 			},
 			problems,
@@ -530,7 +475,6 @@ describe("review section top-level type", () => {
 			"review.advisorAfterFailures 必须显式配置",
 			"review.timeoutMinutes 必须显式配置",
 			"review.tools 必须显式配置",
-			"review.background 必须显式配置",
 			"review.language 必须显式配置",
 		]);
 	});
@@ -557,7 +501,7 @@ describe("feature switch types", () => {
 
 	test("boolean switches are valid and review does not constrain Master", async () => {
 		const module = (await loadFirecodeModule("config.js", {
-			configJsonc: `{ "features": { "review": false } }`,
+			configJsonc: `{ "features": { "review": false, "watcher": false } }`,
 		})) as { loadConfig: () => { problems: string[] } };
 		expect(module.loadConfig().problems).toEqual([]);
 	});

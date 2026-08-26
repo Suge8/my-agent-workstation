@@ -62,6 +62,7 @@ export interface ActivityView {
 type ViewSource = () => ActivityView | undefined;
 
 export function showActivity(ctx: ExtensionContext, view: ViewSource): void {
+	if (ctx.hasUI === false) return;
 	if (typeof ctx.ui.setWorkingVisible === "function") ctx.ui.setWorkingVisible(false);
 	setReviewTitle(ctx, view());
 	if (typeof ctx.ui.setWidget !== "function") return;
@@ -74,6 +75,7 @@ export function showActivity(ctx: ExtensionContext, view: ViewSource): void {
 }
 
 export function hideActivity(ctx: ExtensionContext): void {
+	if (ctx.hasUI === false) return;
 	if (typeof ctx.ui.setWorkingVisible === "function") ctx.ui.setWorkingVisible(true);
 	restoreReviewTitle(ctx);
 	if (typeof ctx.ui.setWidget === "function")
@@ -92,7 +94,7 @@ export function lockEditor(
 	_view: ViewSource,
 	cancel: () => void,
 ): void {
-	if (typeof ctx.ui.setEditorComponent !== "function") return;
+	if (ctx.hasUI === false || typeof ctx.ui.setEditorComponent !== "function") return;
 	ctx.ui.setEditorComponent((tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager) => {
 		const editor = new ReviewEditor(tui, theme, keybindings, cancel);
 		return editor;
@@ -100,6 +102,7 @@ export function lockEditor(
 }
 
 export function unlockEditor(ctx: ExtensionContext): void {
+	if (ctx.hasUI === false) return;
 	if (typeof ctx.ui.setEditorComponent === "function")
 		ctx.ui.setEditorComponent(undefined);
 }

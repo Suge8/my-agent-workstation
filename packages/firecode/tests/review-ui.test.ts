@@ -11,7 +11,7 @@ const reviewers = [{ model: "openai-codex/gpt-5.6-sol" }, { model: "openai-codex
 
 afterEach(cleanupFirecodeModules);
 
-describe("reviewer progress derived from subprocess events", () => {
+describe("reviewer progress derived from structured session events", () => {
 	test("starts every reviewer as running with a readable label", async () => {
 		const { initialProgress } = await loadProgress();
 		const progress = initialProgress(reviewers, "zh");
@@ -21,15 +21,15 @@ describe("reviewer progress derived from subprocess events", () => {
 	});
 
 	test("turns tool calls into human actions and counts them per reviewer", async () => {
-		const { applyProcessEvent, initialProgress } = await loadProgress();
+		const { applySessionEvent, initialProgress } = await loadProgress();
 		let progress = initialProgress(reviewers, "zh");
-		progress = applyProcessEvent(
+		progress = applySessionEvent(
 			progress,
 			0,
 			{ type: "tool_execution_start", toolName: "read", args: { path: "agent/review/state.ts" } },
 			"zh",
 		);
-		progress = applyProcessEvent(
+		progress = applySessionEvent(
 			progress,
 			0,
 			{ type: "tool_execution_start", toolName: "bash", args: { command: "bun test  x" } },
@@ -43,19 +43,19 @@ describe("reviewer progress derived from subprocess events", () => {
 	});
 
 	test("tracks tool completion and token usage for progress monitoring", async () => {
-		const { applyProcessEvent, initialProgress } = await loadProgress();
+		const { applySessionEvent, initialProgress } = await loadProgress();
 		let progress = initialProgress(reviewers, "zh");
-		progress = applyProcessEvent(progress, 0, {
+		progress = applySessionEvent(progress, 0, {
 			type: "tool_execution_start",
 			toolCallId: "call-1",
 			toolName: "read",
 			args: { path: "review/state.ts" },
 		}, "zh");
-		progress = applyProcessEvent(progress, 0, {
+		progress = applySessionEvent(progress, 0, {
 			type: "tool_execution_end",
 			toolCallId: "call-1",
 		}, "zh");
-		progress = applyProcessEvent(progress, 0, {
+		progress = applySessionEvent(progress, 0, {
 			type: "message_end",
 			message: { usage: { totalTokens: 1250 } },
 		}, "zh");
@@ -65,9 +65,9 @@ describe("reviewer progress derived from subprocess events", () => {
 	});
 
 	test("ignores non-tool events so the bar does not churn", async () => {
-		const { applyProcessEvent, initialProgress } = await loadProgress();
+		const { applySessionEvent, initialProgress } = await loadProgress();
 		const progress = initialProgress(reviewers, "zh");
-		const next = applyProcessEvent(progress, 0, { type: "message_update" }, "zh");
+		const next = applySessionEvent(progress, 0, { type: "message_update" }, "zh");
 		expect(next).toBe(progress);
 	});
 

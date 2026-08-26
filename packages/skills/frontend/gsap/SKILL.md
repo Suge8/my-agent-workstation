@@ -1,5 +1,6 @@
 ---
 name: gsap
+disable-model-invocation: true
 description: GSAP、GreenSock、ScrollTrigger、时间线、滚动或 React GSAP 动画任务；按需读取本地参考。
 ---
 

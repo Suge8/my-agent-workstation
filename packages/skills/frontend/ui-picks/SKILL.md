@@ -1,6 +1,6 @@
 ---
 name: ui-picks
-description: 个人 UI 库选型表：需要动效组件、canvas 特效、AI 聊天界面、界面音效、字体搭配等能力时查表选库，按指定方式安装最新版本；用户说"选型库 / 我的库 / 用什么库"时也使用。
+description: 个人 UI 库选型表，需要组件等能力时查表选库
 ---
 
 # UI Picks

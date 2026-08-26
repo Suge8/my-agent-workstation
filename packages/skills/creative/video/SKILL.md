@@ -1,6 +1,7 @@
 ---
 name: video
-description: 视频统一入口：把主题策划成运动优先的动画、用 Remotion 实现与渲染，或通过 Grok/Seedance 直接生成带音轨 MP4。用户要视频、短片、动画方案、动态分镜或 Remotion 开发时使用；静态图片用 gpt-image。
+disable-model-invocation: true
+description: 视频统一入口：把主题策划成运动优先的动画、用 Remotion 实现与渲染，或通过 Grok/Seedance 直接生成带音轨 MP4
 ---
 
 # Video

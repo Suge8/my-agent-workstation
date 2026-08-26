@@ -2,26 +2,18 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildBarkPayload, hasBlockedWorker } from "../session/bark.js";
+import { buildBarkPayload, hasPendingDisposition } from "../session/bark.js";
 
-const worker = (status: string) => ({
+const worker = (disposition?: "pending" | "reminded") => ({
 	name: "w1",
 	model: "openai-codex/gpt-5.6-sol",
 	thinking: "medium",
-	status,
-	paneId: "p1",
-	tabId: "t1",
+	status: "idle",
 	sessionPath: "/tmp/w1.jsonl",
-});
-const worker2 = (status: string) => ({
-	...worker(status),
-	name: "w2",
-	paneId: "p2",
-	tabId: "t2",
-	sessionPath: "/tmp/w2.jsonl",
+	...(disposition ? { disposition } : {}),
 });
 
-test("有工人待拍板时升 timeSensitive 并带副标题，否则 active 无副标题", () => {
+test("有待拍板事件时升 timeSensitive 并带副标题，否则 active 无副标题", () => {
 	const base = { title: "s", body: "b", group: "g", sessionId: "sid" };
 	const urgent = buildBarkPayload({ ...base, awaitingDecision: true });
 	expect(urgent.level).toBe("timeSensitive");
@@ -33,17 +25,17 @@ test("有工人待拍板时升 timeSensitive 并带副标题，否则 active 无
 	expect(urgent.id).toBe("sid");
 });
 
-test("hasBlockedWorker：blocked 为真；全忙、文件缺失、文件损坏都为假", async () => {
+test("v7 待发落 Worker 触发待拍板，空池、文件缺失与损坏均不触发", async () => {
 	const dir = await mkdtemp(join(tmpdir(), "firecode-bark-"));
 	try {
 		const path = join(dir, "state.json");
-		await writeFile(path, JSON.stringify({ version: 6, workers: [worker("working"), worker2("blocked")] }));
-		expect(hasBlockedWorker(path)).toBe(true);
-		await writeFile(path, JSON.stringify({ version: 6, workers: [worker("working")] }));
-		expect(hasBlockedWorker(path)).toBe(false);
-		expect(hasBlockedWorker(join(dir, "missing.json"))).toBe(false);
+		await writeFile(path, JSON.stringify({ version: 7, workers: [worker("pending")] }));
+		expect(hasPendingDisposition(path)).toBe(true);
+		await writeFile(path, JSON.stringify({ version: 7, workers: [worker()] }));
+		expect(hasPendingDisposition(path)).toBe(false);
+		expect(hasPendingDisposition(join(dir, "missing.json"))).toBe(false);
 		await writeFile(path, "not json");
-		expect(hasBlockedWorker(path)).toBe(false);
+		expect(hasPendingDisposition(path)).toBe(false);
 	} finally {
 		await rm(dir, { recursive: true, force: true });
 	}

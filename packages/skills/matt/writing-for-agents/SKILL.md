@@ -1,6 +1,6 @@
 ---
 name: writing-for-agents
-description: 为 agent 编写文档。在创建或编辑 skill，或修改 AGENTS.md、CLAUDE.md 时使用。
+description: 为 agent 编写合适它的文档，在任何文档修改中使用
 ---
 
 为 agent 消费的任何文档提供参考——skill、`AGENTS.md` / `CLAUDE.md`，以及通过指针到达的文档。打包方式不同；写法相同：同一组杠杆让每次运行都采取相同的 _过程_，而不是产出相同的结果。

@@ -1,11 +1,8 @@
-/**
- * 顾问仲裁：连续 N 轮失败后介入，返回 continue | stop | narrow 三选一，
- * 防止审查循环无限拉锯。子进程故障不伪装成仲裁结论，由外层收口为 Review Unavailable。
- */
+/** 顾问仲裁：连续 N 轮失败后经独立进程内会话返回三选一裁决。 */
 import type { Language } from "../config.js";
 import type { PromptLayers } from "./prompt.js";
 import type { AdvisorResult, AdvisorVerdict } from "./state.js";
-import { runPiProcess } from "./process.js";
+import type { ReviewSessionRunner } from "./session.js";
 import type { ReviewModelConfig } from "./reviewer.js";
 
 export interface RunAdvisorOptions {
@@ -14,13 +11,17 @@ export interface RunAdvisorOptions {
 	cwd: string;
 	language: Language;
 	signal?: AbortSignal;
+	runSession: ReviewSessionRunner;
 	onEvent?: (event: Record<string, unknown>) => void;
 }
 
 export async function runAdvisor(options: RunAdvisorOptions): Promise<AdvisorResult> {
-	const result = await runPiProcess({
-		command: options.config.command,
-		args: advisorArgs(options.config, options.prompt),
+	const result = await options.runSession({
+		role: "advisor",
+		model: options.config.model,
+		thinking: options.config.thinking,
+		tools: options.config.tools,
+		prompt: options.prompt,
 		cwd: options.cwd,
 		timeoutMs: options.config.timeoutMs,
 		signal: options.signal,
@@ -30,41 +31,17 @@ export async function runAdvisor(options: RunAdvisorOptions): Promise<AdvisorRes
 	return parseAdvisorOutput(result.text, options.language);
 }
 
-export function advisorArgs(config: ReviewModelConfig, prompt: PromptLayers) {
-	return [
-		"--no-session",
-		"--mode",
-		"json",
-		"--system-prompt",
-		prompt.system.replaceAll("\0", ""),
-		"--no-extensions",
-		"--no-skills",
-		"--no-prompt-templates",
-		"--no-context-files",
-		"--model",
-		config.model,
-		"--thinking",
-		config.thinking,
-		"--tools",
-		config.tools.join(","),
-		"--exclude-tools",
-		"write,edit",
-		"-p",
-		prompt.user.replaceAll("\0", ""),
-	];
-}
-
 const VERDICTS = new Set<AdvisorVerdict>(["continue", "stop", "narrow"]);
 
 function advisorProcessError(
-	result: Exclude<Awaited<ReturnType<typeof runPiProcess>>, { kind: "output" }>,
+	result: Exclude<Awaited<ReturnType<ReviewSessionRunner>>, { kind: "output" }>,
 	language: Language,
 ): string {
-	const prefix = language === "en" ? "advisor subprocess unavailable" : "顾问子进程不可用";
+	const prefix = language === "en" ? "advisor session unavailable" : "顾问会话不可用";
 	if (result.kind === "aborted") return `${prefix}: aborted`;
-	if (result.kind === "timeout") return `${prefix}: timeout${result.stderr ? `\n${result.stderr}` : ""}`;
-	if (result.kind === "empty") return `${prefix}: empty output${result.stderr ? `\n${result.stderr}` : ""}`;
-	return `${prefix}: ${result.message}${result.stderr ? `\n${result.stderr}` : ""}`;
+	if (result.kind === "timeout") return `${prefix}: timeout`;
+	if (result.kind === "empty") return `${prefix}: empty output`;
+	return `${prefix}: ${result.message}`;
 }
 
 /** 首行应为裸裁决词；容忍模型前言，在前几个非空行内识别裁决行，
@@ -95,7 +72,7 @@ export function parseAdvisorOutput(
 		.join("\n")
 		.trim();
 	if (!verdict) {
-		// 把首行原文带回去：顾问子进程跑完即退、原始输出不落盘，这是事后诊断解析失败的唯一线索。
+		// 把首行原文带回去：顾问会话跑完即释放、原始输出不落盘，这是事后诊断解析失败的唯一线索。
 		const sample = firstLine.slice(0, 80);
 		return {
 			verdict: "continue",

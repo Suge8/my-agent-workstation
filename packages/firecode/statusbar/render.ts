@@ -114,6 +114,11 @@ export function reviewStatus(statuses: ReadonlyMap<string, string>): string {
 	return oneLine(statuses.get("fire-review") ?? "");
 }
 
+/** 首行模块状态由各模块的 setStatus/onChange 驱动，状态栏只负责组合。 */
+export function statusBadges(statuses: ReadonlyMap<string, string>, separator: string): string {
+	return [statuses.get("master"), statuses.get("watcher")].filter(Boolean).join(separator);
+}
+
 export function alignRight(left: string, right: string, width: number): string {
 	if (!right) return left;
 	const padding = width - visibleWidth(left) - visibleWidth(right);

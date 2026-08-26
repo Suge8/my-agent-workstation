@@ -28,10 +28,9 @@ export function projectIdentity(
 	};
 }
 
-export function registerHerdrDisplay(pi: ExtensionAPI): void {
+export function registerHerdrDisplay(pi: ExtensionAPI, subsession = false): void {
 	const env = herdrPaneEnv();
-	if (!env) return;
-	if (process.env.FIRECODE_MASTER_WORKER) return;
+	if (!env || subsession) return;
 	const paneId = env.paneId;
 
 	let chain = Promise.resolve();

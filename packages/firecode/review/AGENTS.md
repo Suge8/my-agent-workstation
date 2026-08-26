@@ -11,7 +11,7 @@ reload/new/resume/fork 保留可恢复状态，quit 才落终态。checkpoint �
 
 `session_start` 只恢复 checkpoint，宿主在所有异步 session_start handler 完成后发出的 `resources_discover`
 才允许推进；`agent_settled` 由 review 判断能否开审。`agent_start` 另作竞态兜底：若审查仍在跑，先 abort
-并等待全部子进程退出，执行模型才进入 turn_start。
+并等待全部审查会话退出，执行模型才进入 turn_start。
 
 `awaiting_fix` 把修复生命周期 `pending → awaiting_start → running → completed` 写进 checkpoint；reload
 会重投未确认完成的反馈，只有 completed 才进入下一审查轮。宿主 `sendMessage` 返回 void，因此反馈用
@@ -20,7 +20,8 @@ reload/new/resume/fork 保留可恢复状态，quit 才落终态。checkpoint �
 质量裁决终态（通过 / 顾问叫停 / maxRounds 用尽）先经 `summarizing` 相：结果卡照发，再投递带反循环
 禁令的总结提示（followUp + triggerTurn，agent_start 回执、agent_end 收尾），总结回合结束才落 `settled`；
 总结生命周期持久化，reload 重投未确认总结，失败静默收尾不升级；事故终态（取消/超时/基础设施错误/quit）
-不烧总结回合。占用标签持有到总结完成，Master 的审查等待自然捕获总结作为最终回复。
+不烧总结回合。修复反馈、总结提示与状态卡 content 统一包在 `<firecode_review>` 中，details 保持原始卡片数据。
+占用标签持有到总结完成，Master 的审查等待自然捕获总结作为最终回复。
 
 `outcome.ts` 是外部读取终态判定的唯一入口，checkpoint 格式仍归 review 所有。
 
@@ -40,9 +41,10 @@ live 外观一致，渲染器永不抛异常（details 校验失败降级 conten
 审查者落定即在活动条显示结果摘要，顾问裁决摘要在迁入的修复相活动条显示（落定与相迁移同微任务链，
 needs_fix 相无渲染机会）；等待模型时编辑器完全隐藏并禁止输入，esc/Ctrl+C 随时取消审查（顾问阶段 esc
 跳过咨询），`awaiting_fix` 相把输入交还用户。按键必须经 keybindings/终端转义序列匹配，不能只比裸 `\x1b`。
+无 TUI 的会话照常运行完整审查循环，不访问 UI；取消由会话退出或总体 watchdog 负责，结果卡仍写入会话记录。
 
-`progress.ts` 从子进程事件派生模型进度、token、当前工具耗时及历史工具行，是纯 UI 态，不入 checkpoint。
-子进程 stdout 按行增量消费（不得尾部截断，否则长输出会被误判为空）。
+`progress.ts` 从 spawn 发布的结构化会话事件派生模型进度、token、当前工具耗时及历史工具行，是纯 UI 态，
+不入 checkpoint；最终回复直接取会话事件中的完整 assistant 消息，没有文本流截断层。
 
 ## 占用信号
 
@@ -56,10 +58,10 @@ needs_fix 相无渲染机会）；等待模型时编辑器完全隐藏并禁止�
 
 ## 契约与配置
 
-审查政策与 PASS/FAIL 输出契约以 `prompts/review.{zh,en}.md` 为唯一事实源，经 `--system-prompt` 注入；需求、
+审查政策与 PASS/FAIL 输出契约以 `prompts/review.{zh,en}.md` 为唯一事实源，经 spawn 整体替换系统提示；需求、
 关注点、往轮结果和完整会话记录留在 user prompt，记录中的需求照常生效，但不能反向改写审查职责、工具边界与
-输出契约。审查子进程关闭自动扩展、Skill、模板和上下文注入；项目约定由审查者按 system policy 主动读取适用的
-AGENTS.md。每条 FAIL 发现必须六要素齐全（标题、严重程度、问题、违反的约定与期望、证据、验证命令，标签
+输出契约。审查会话经 `master/spawn.ts` 创建，使用 memory 持久化、整体替换系统提示，关闭自动扩展、Skill、
+模板和上下文注入；项目约定由审查者按 system policy 主动读取适用的 AGENTS.md。每条 FAIL 发现必须六要素齐全（标题、严重程度、问题、违反的约定与期望、证据、验证命令，标签
 加粗；校验容忍旧措辞与非粗体），同票混入非法发现整票作废为基础设施错误。往轮发现清单随轮注入顾问裁决
 （`prompt.ts`），审查者不得原样重提已仲裁事项——僵尸发现的收敛闭环。
 
@@ -67,7 +69,7 @@ AGENTS.md。每条 FAIL 发现必须六要素齐全（标题、严重程度、�
 命令。保留 bash 是有意的——审查者要跑测试取证；真需要物理隔离得上容器或只读挂载。
 
 config.jsonc 的 `review` 节必须显式完整配置：审查者/顾问模型、maxRounds、advisorAfterFailures、
-timeoutMinutes、tools、background、language；公开包不内置依赖个人认证或偏好的模型。缺节、缺字段、解析失败
+timeoutMinutes、tools、language；公开包不内置依赖个人认证或偏好的模型。缺节、缺字段、解析失败
 或该节有任何配置问题时，`/fire-review` 与 checkpoint 恢复都拒绝启动；活动 checkpoint 保持原样，修好配置并
 重启后继续恢复——静默回退模型会拿用户没配的模型真实发起调用。
 不读 pi-flow 的 config.json。

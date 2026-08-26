@@ -380,8 +380,8 @@ describe("fire-review reducer", () => {
 	test("all reviewers error settles as infrastructure error without a failed round", async () => {
 		await loadState();
 		let state = reduce(initialState("g"), { type: "START", focus: "", busy: false }, LIMITS, 1000).state;
-		state = settle(state, 0, "error", "审查子进程超时").state;
-		const result = settle(state, 1, "error", "审查子进程启动失败");
+		state = settle(state, 0, "error", "审查会话超时").state;
+		const result = settle(state, 1, "error", "审查会话启动失败");
 		expect(result.state.phase).toBe("settled");
 		expect(result.state.history[0].result).toBe("error");
 		expect(result.effects).toMatchObject([{ kind: "send_card", card: { kind: "error" } }]);
@@ -456,11 +456,11 @@ describe("fire-review reducer", () => {
 		let state = reduce(initialState("g"), { type: "START", focus: "", busy: false }, three, 1000).state;
 		state = reduce(state, { type: "REVIEWER_SETTLED", index: 0, result: reviewer(0, "passed", "PASS\n证据：文件=a.ts；命令=ls") }, three, 1000).state;
 		state = reduce(state, { type: "REVIEWER_SETTLED", index: 1, result: reviewer(1, "passed", "PASS\n证据：文件=b.ts；命令=ls") }, three, 1000).state;
-		const settled = reduce(state, { type: "REVIEWER_SETTLED", index: 2, result: reviewer(2, "error", "审查子进程超时") }, three, 1000);
+		const settled = reduce(state, { type: "REVIEWER_SETTLED", index: 2, result: reviewer(2, "error", "审查会话超时") }, three, 1000);
 		expect(settled.state.phase).toBe("settled");
 		expect(settled.state.history[0].result).toBe("error");
 		expect(settled.state.history[0].details).toContain("模型 1 · m0\nPASS");
-		expect(settled.state.history[0].details).toContain("模型 3 · m2\n审查子进程超时");
+		expect(settled.state.history[0].details).toContain("模型 3 · m2\n审查会话超时");
 		expect(settled.state.history[0].details).not.toContain("PASS · m2");
 	});
 
@@ -498,7 +498,7 @@ describe("fire-review reducer", () => {
 		await loadState();
 		let state = reduce(initialState("g"), { type: "START", focus: "", busy: false }, LIMITS, 1000).state;
 		state = settle(state, 0, "failed", "FAIL\n发现 1").state;
-		const result = settle(state, 1, "error", "审查子进程认证失败");
+		const result = settle(state, 1, "error", "审查会话认证失败");
 		expect(result.state.history[0].result).toBe("error");
 		expect(result.effects).toMatchObject([{ kind: "send_card", card: { kind: "error" } }]);
 	});
@@ -511,12 +511,12 @@ describe("fire-review reducer", () => {
 		state = reduce(completeRepair(state), { type: "ADVANCE" }, LIMITS, 20_000).state;
 		state = settle(state, 0, "failed", "FAIL\n发现 3").state;
 		state = settle(state, 1, "failed", "FAIL\n发现 4").state;
-		const result = reduce(state, { type: "INFRASTRUCTURE_ERROR", details: "顾问子进程额度不足" }, LIMITS, 30_000);
+		const result = reduce(state, { type: "INFRASTRUCTURE_ERROR", details: "顾问会话额度不足" }, LIMITS, 30_000);
 		expect(result.state.phase).toBe("settled");
 		expect(result.state.history.at(-1)?.result).toBe("error");
 		expect(result.effects).toEqual([{
 			kind: "send_card",
-			card: { kind: "error", message: "顾问子进程额度不足" },
+			card: { kind: "error", message: "顾问会话额度不足" },
 		}]);
 	});
 
@@ -524,7 +524,7 @@ describe("fire-review reducer", () => {
 		await loadState();
 		let state = reduce(initialState("g"), { type: "START", focus: "", busy: false }, LIMITS, 1000).state;
 		state = settle(state, 0, "passed", "PASS\nok").state;
-		const result = settle(state, 1, "error", "审查子进程超时");
+		const result = settle(state, 1, "error", "审查会话超时");
 		expect(result.state.history[0].result).toBe("error");
 		expect(result.effects).toMatchObject([{ kind: "send_card", card: { kind: "error" } }]);
 	});
@@ -537,8 +537,8 @@ describe("fire-review reducer", () => {
 		};
 		let state = reduce(initialState("g"), { type: "START", focus: "", busy: false }, three, 1000).state;
 		state = reduce(state, { type: "REVIEWER_SETTLED", index: 0, result: reviewer(0, "passed", "PASS\n证据：文件=a.ts；命令=ls") }, three, 1000).state;
-		state = reduce(state, { type: "REVIEWER_SETTLED", index: 1, result: reviewer(1, "error", "子进程超时") }, three, 1000).state;
-		const settled = reduce(state, { type: "REVIEWER_SETTLED", index: 2, result: reviewer(2, "error", "子进程启动失败") }, three, 1000);
+		state = reduce(state, { type: "REVIEWER_SETTLED", index: 1, result: reviewer(1, "error", "会话超时") }, three, 1000).state;
+		const settled = reduce(state, { type: "REVIEWER_SETTLED", index: 2, result: reviewer(2, "error", "会话启动失败") }, three, 1000);
 		expect(settled.state.history[0].result).toBe("error");
 		expect(settled.effects).toMatchObject([{ kind: "send_card", card: { kind: "error" } }]);
 	});

@@ -141,7 +141,11 @@ export function buildFixFeedback(input: FixFeedbackInput): string {
 					: "顾问建议";
 		parts.push("", `${label}${input.language === "en" ? ":" : "："}`, input.advisor.advice);
 	}
-	return parts.join("\n");
+	return reviewEnvelope(parts.join("\n"));
+}
+
+export function reviewEnvelope(content: string): string {
+	return `<firecode_review>\n${content}\n</firecode_review>`;
 }
 
 function narrowInstruction(language: Language, narrowed: boolean) {
@@ -175,8 +179,10 @@ export function buildSummaryPrompt(input: SummaryPromptInput): string {
 		? `${input.material.slice(0, SUMMARY_MATERIAL_LIMIT)}\n…`
 		: input.material;
 	const body = summaryInstruction(input.language, input.kind, input.rounds);
-	if (!material.trim()) return body;
-	return `${body}\n\n${summaryMaterialLabel(input.language, input.kind)}\n${material}`;
+	const content = material.trim()
+		? `${body}\n\n${summaryMaterialLabel(input.language, input.kind)}\n${material}`
+		: body;
+	return reviewEnvelope(content);
 }
 
 function summaryMaterialLabel(language: Language, kind: SummaryKind): string {

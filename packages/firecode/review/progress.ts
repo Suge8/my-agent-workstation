@@ -1,8 +1,6 @@
 /**
- * 审查者实时进度：从子进程事件流派生的 UI 层状态（纯函数）。
- *
- * 不进 reducer、不写 checkpoint：更新频率是每次工具调用，持久化它只会放大写入，
- * 而它对恢复毫无价值——重启后由 reducer 状态重建骨架即可，丢掉的只是流水。
+ * 审查者实时进度：从结构化会话事件派生的 UI 层状态（纯函数）。
+ * 不进 reducer、不写 checkpoint；恢复时由 reducer 状态重建骨架。
  */
 import { clip, formatModelName } from "../format.js";
 import type { Language } from "../config.js";
@@ -65,10 +63,10 @@ export function initialProgress(
 }
 
 /**
- * 把一条子进程事件并入进度快照，返回新数组（无事件相关变化时返回原数组，
+ * 把一条会话事件并入进度快照，返回新数组（无事件相关变化时返回原数组，
  * 调用方据此跳过重绘）。
  */
-export function applyProcessEvent(
+export function applySessionEvent(
 	progress: readonly ReviewerProgress[],
 	index: number,
 	event: Record<string, unknown>,

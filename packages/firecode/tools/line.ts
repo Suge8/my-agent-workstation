@@ -13,7 +13,7 @@ import {
 } from "./parts.js";
 import { takeDuration } from "./timing.js";
 
-const RAIL = "▏ ";
+export const RAIL = "▏ ";
 /** 右侧列与主体之间至少留出的空隙，不够就先丢弃右侧列 */
 const RIGHT_GAP = 2;
 const MIN_VALUE_WIDTH = 8;
@@ -103,7 +103,7 @@ class ExpandedResult implements Component {
 	}
 }
 
-function applyBg(line: string, width: number, bgFn?: (text: string) => string): string {
+export function paintBgLine(line: string, width: number, bgFn?: (text: string) => string): string {
 	const visLen = visibleWidth(line);
 	const padNeeded = Math.max(0, width - visLen);
 	const padded = line + " ".repeat(padNeeded);
@@ -133,7 +133,7 @@ export class ToolLine implements Component {
 		const bgFn = typeof theme.bg === "function" ? (text: string) => theme.bg(status.bg, text) : undefined;
 		if (safeWidth <= headWidth) {
 			const clipped = paint(theme, clipParts(head, safeWidth, "end"));
-			return [applyBg(clipped, width, bgFn)];
+			return [paintBgLine(clipped, width, bgFn)];
 		}
 
 		const meta = [...(this.options.meta ?? []), ...(state.meta ?? [])];
@@ -169,7 +169,7 @@ export class ToolLine implements Component {
 				" ".repeat(pad) +
 				right.map((part) => paint(theme, [part])).join(theme.fg("dim", " · "));
 		}
-		return [applyBg(line, width, bgFn)];
+		return [paintBgLine(line, width, bgFn)];
 	}
 }
 

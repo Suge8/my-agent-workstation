@@ -1,22 +1,12 @@
-/**
- * 审查者：pi 子进程调用 + PASS/FAIL 输出契约解析（纯函数）。
- *
- * 进程参数：`pi --no-session --mode json --model X --thinking Y
- * --tools read,grep,find,ls,bash --exclude-tools write,edit -p <prompt>`。
- * 只读是契约而非能力边界：排除 write/edit 只堵住了这两个工具，保留的 bash 仍能
- * 在项目目录执行任意命令（宿主 bash 工具不做只读过滤，也没有沙箱）。
- * 保留 bash 是有意的：审查者需要跑测试与命令取证，否则只能靠读代码猜。
- * 真需物理隔离要上容器或只读挂载，不在当前方案内。
- */
-import type { Language } from "../config.js";
+/** 审查者：进程内 memory 会话 + PASS/FAIL 输出契约解析。 */
+import type { Language, ThinkingLevelValue } from "../config.js";
 import type { PromptLayers } from "./prompt.js";
 import type { ReviewerResult, ReviewerStatus } from "./state.js";
-import { type PiProcessEvent, runPiProcess } from "./process.js";
+import type { ReviewSessionRunner } from "./session.js";
 
 export interface ReviewModelConfig {
 	model: string;
-	thinking: string;
-	command: string;
+	thinking: ThinkingLevelValue;
 	tools: string[];
 	timeoutMs: number;
 }
@@ -28,8 +18,9 @@ export interface RunReviewerOptions {
 	cwd: string;
 	language: Language;
 	signal?: AbortSignal;
-	/** 子进程事件流：驱动活动条的实时进度。 */
-	onEvent?: (event: PiProcessEvent) => void;
+	runSession: ReviewSessionRunner;
+	/** 结构化会话事件：驱动活动条的实时进度。 */
+	onEvent?: (event: Record<string, unknown>) => void;
 }
 
 export type ParseOutcome = {
@@ -38,11 +29,14 @@ export type ParseOutcome = {
 	details: string;
 };
 
-/** 运行一个审查者子进程并解析其输出。子进程层面的失败一律记为 error（不拖垮整轮）。 */
+/** 运行一个独立审查会话并解析输出。会话故障记为 error，不拖垮整轮。 */
 export async function runReviewer(options: RunReviewerOptions): Promise<ReviewerResult> {
-	const result = await runPiProcess({
-		command: options.config.command,
-		args: reviewerArgs(options.config, options.prompt),
+	const result = await options.runSession({
+		role: "reviewer",
+		model: options.config.model,
+		thinking: options.config.thinking,
+		tools: options.config.tools,
+		prompt: options.prompt,
 		cwd: options.cwd,
 		timeoutMs: options.config.timeoutMs,
 		signal: options.signal,
@@ -60,30 +54,6 @@ export async function runReviewer(options: RunReviewerOptions): Promise<Reviewer
 		summary: parsed.summary,
 		details: parsed.details,
 	};
-}
-
-export function reviewerArgs(config: ReviewModelConfig, prompt: PromptLayers) {
-	return [
-		"--no-session",
-		"--mode",
-		"json",
-		"--system-prompt",
-		prompt.system.replaceAll("\0", ""),
-		"--no-extensions",
-		"--no-skills",
-		"--no-prompt-templates",
-		"--no-context-files",
-		"--model",
-		config.model,
-		"--thinking",
-		config.thinking,
-		"--tools",
-		config.tools.join(","),
-		"--exclude-tools",
-		"write,edit",
-		"-p",
-		prompt.user.replaceAll("\0", ""),
-	];
 }
 
 /** 解析审查者文本输出：首行严格 PASS/FAIL + 证据锚点闸门。 */
@@ -113,10 +83,10 @@ export function parseReviewOutput(text: string, language: Language): ParseOutcom
 
 function processFailure(
 	result:
-		| { kind: "timeout"; stderr: string }
+		| { kind: "timeout" }
 		| { kind: "aborted" }
-		| { kind: "error"; message: string; stderr: string }
-		| { kind: "empty"; stderr: string },
+		| { kind: "error"; message: string }
+		| { kind: "empty" },
 	language: Language,
 ): ParseOutcome {
 	if (result.kind === "aborted")
@@ -127,15 +97,9 @@ function processFailure(
 		return {
 			status: "error",
 			summary: "",
-			details: `${systemError(language, "start")}${result.message}${
-				result.stderr ? `\n${tail(result.stderr)}` : ""
-			}`,
+			details: `${systemError(language, "start")}${result.message}`,
 		};
-	return {
-		status: "error",
-		summary: "",
-		details: systemError(language, "empty") + (result.stderr ? ` stderr: ${tail(result.stderr)}` : ""),
-	};
+	return { status: "error", summary: "", details: systemError(language, "empty") };
 }
 
 /** 首行判定失败（既不是 PASS 也不是 FAIL）。 */
@@ -156,12 +120,12 @@ function contractViolation(issue: string, language: Language): ParseOutcome {
 
 function systemError(language: Language, kind: "timeout" | "start" | "empty") {
 	if (language === "en") {
-		if (kind === "timeout") return "review subprocess timed out before returning valid output. ";
-		if (kind === "start") return "review subprocess failed to start. ";
+		if (kind === "timeout") return "review session timed out before returning valid output. ";
+		if (kind === "start") return "review session failed. ";
 		return "review output is empty: no check result. ";
 	}
-	if (kind === "timeout") return "审查子进程超时，未在时限内返回有效输出。";
-	if (kind === "start") return "审查子进程启动失败。";
+	if (kind === "timeout") return "审查会话超时，未在时限内返回有效输出。";
+	if (kind === "start") return "审查会话失败。";
 	return "审查输出为空：无审查结论。";
 }
 

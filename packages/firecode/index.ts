@@ -17,10 +17,11 @@ import { registerStatusBar } from "./statusbar/index.js";
 import { registerToolRendering } from "./tools/index.js";
 import { registerReview } from "./review/index.js";
 import { registerMaster } from "./master/index.js";
+import { currentSubsessionRole } from "./master/role.js";
+import { registerWatcher } from "./watcher/index.js";
 
-const REGISTRARS: Record<Exclude<Feature, "review" | "master">, (pi: ExtensionAPI) => void> = {
+const REGISTRARS: Record<Exclude<Feature, "review" | "master" | "watcher" | "statusbar" | "bark">, (pi: ExtensionAPI) => void> = {
 	header: registerHeader,
-	statusbar: registerStatusBar,
 	tools: registerToolRendering,
 	presets: registerPresets,
 	rename: registerSessionName,
@@ -28,26 +29,34 @@ const REGISTRARS: Record<Exclude<Feature, "review" | "master">, (pi: ExtensionAP
 	claudeSub: registerClaudeSub,
 	openaiNative: registerOpenAINative,
 	workingFlame: registerWorkingFlame,
-	bark: registerBark,
 };
 
-export default function firecode(pi: ExtensionAPI): void {
-	const { config, problems } = loadConfig();
+type FirecodeSessionRole = "main" | "worker" | "observer" | "reviewer" | "advisor";
 
+export function registerFirecode(pi: ExtensionAPI, role: FirecodeSessionRole = "main"): void {
+	const { config, problems } = loadConfig();
+	const subsession = role !== "main";
 	const reviewEnabled = config.features.review !== false;
 	for (const [feature, register] of Object.entries(REGISTRARS)) {
-		const enabled = config.features[feature as Exclude<Feature, "review" | "master">] !== false;
+		const enabled = config.features[feature as Exclude<Feature, "review" | "master" | "watcher" | "statusbar" | "bark">] !== false;
 		if (enabled) register(pi);
 	}
-	if (config.features.master !== false) registerMaster(pi);
+	if (config.features.statusbar !== false) registerStatusBar(pi, subsession);
+	if (config.features.bark !== false) registerBark(pi, subsession);
+	if (config.features.watcher !== false) registerWatcher(pi, {}, subsession);
+	if (config.features.master !== false) registerMaster(pi, {}, subsession);
 	// herdr 显示投影没有开关：herdr 之外自我禁用，只写显示层。
-	registerHerdrDisplay(pi);
+	registerHerdrDisplay(pi, subsession);
 	// 历史卡渲染与 checkpoint 收口不受 feature 开关控制；开关只控制命令和执行循环。
 	// features 整节类型错误会被安全回退成全关，但那是配置坏而非用户关闭：不封存 checkpoint。
 	registerReview(pi, reviewEnabled, problems.includes("features 必须是对象"));
 
 	if (problems.length === 0) return;
 	pi.on("session_start", (_event, ctx) => {
-		for (const problem of problems) ctx.ui.notify(`FireCode 配置：${problem}`, "warning");
+		ctx.ui.notify(`FireCode 配置有问题：${problems.join("；")}`, "warning");
 	});
+}
+
+export default function firecode(pi: ExtensionAPI): void {
+	registerFirecode(pi, currentSubsessionRole() ?? "main");
 }

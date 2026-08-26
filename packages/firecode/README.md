@@ -1,6 +1,6 @@
 # FireCode
 
-FireCode 是一个模块化 Pi Package，提供终端状态与工具渲染、会话预设、`/fire-review` 对抗审查和按需 `/fire-master` 子代理委派。各模块由功能开关独立注册；关闭任一模块不会改变其余模块。
+FireCode 是一个模块化 Pi Package，提供终端状态与工具渲染、会话预设、`/fire-review` 对抗审查、`/fire-master` 进程内子代理委派和 `/fire-watch` 观察员。指挥官与观察员的新会话状态由配置决定，裸命令只翻转当前会话；各模块由功能开关独立注册，关闭任一模块不会改变其余模块。
 
 ## 安装
 
@@ -27,7 +27,7 @@ curl -fsSL https://raw.githubusercontent.com/Suge8/firecode/v0.1.0/config.exampl
   -o "$agent_dir/extensions/firecode/config.jsonc"
 ```
 
-模板默认只启用本地界面与会话功能。Provider、Bark 通知、审查和子代理委派涉及外部服务或本机工具，配置完成后再开启。缺少运行配置时，FireCode 会关闭可选功能并在会话启动时警告；模板本身不会被运行时读取。
+私人运行配置的运行默认是功能全开；公开配置模板采用安全默认，只启用纯本地界面与会话功能，依赖个人认证或通知地址的 Provider、Bark 通知、审查、子代理委派和观察员默认关闭，配置完成后再开启。审查与观察员的模型必须显式写入运行配置，否则对应功能拒绝启动。缺少运行配置时，FireCode 会关闭可选功能并在会话启动时警告；配置模板本身不会被运行时读取。
 
 ## 开发
 

@@ -1,6 +1,7 @@
 ---
 name: copywriting
-description: 撰写或优化以转化为目标的网站和产品文案：标题、Hero、CTA、价值主张、落地页、定价页、功能页和产品描述。普通文稿去 AI 味用 stop-slop。
+disable-model-invocation: true
+description: 撰写或优化以转化为目标的网站和产品文案：标题、Hero、CTA、价值主张、落地页、定价页、功能页和产品描述
 metadata:
   version: 2.0.0
   source: coreyhaines31/marketingskills

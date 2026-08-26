@@ -8,7 +8,7 @@ import { cleanupFirecodeModules, loadFirecodeModule } from "./loader.js";
 type Handler = (event: any, ctx: any) => unknown;
 type Module = {
 	projectIdentity: (name?: string, model?: string, thinking?: string) => unknown;
-	registerHerdrDisplay: (pi: unknown) => void;
+	registerHerdrDisplay: (pi: unknown, subsession?: boolean) => void;
 };
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -51,7 +51,11 @@ async function herdrStub(failFirst = false) {
 	return { path, requests };
 }
 
-async function register(socketPath: string, env: Record<string, string | undefined> = {}) {
+async function register(
+	socketPath: string,
+	env: Record<string, string | undefined> = {},
+	subsession = false,
+) {
 	const handlers = new Map<string, Handler>();
 	const previous = { ...process.env };
 	cleanups.push(async () => {
@@ -63,7 +67,6 @@ async function register(socketPath: string, env: Record<string, string | undefin
 		HERDR_ENV: "1",
 		HERDR_PANE_ID: "w1:pA",
 		HERDR_SOCKET_PATH: socketPath,
-		FIRECODE_MASTER_WORKER: undefined,
 		...env,
 	})) {
 		if (value === undefined) delete process.env[key];
@@ -74,7 +77,7 @@ async function register(socketPath: string, env: Record<string, string | undefin
 			handlers.set(name, handler);
 		},
 		getThinkingLevel: () => "medium",
-	} as never);
+	} as never, subsession);
 	return handlers;
 }
 
@@ -163,7 +166,7 @@ test("stays silent outside TUI, inside Master Workers and outside herdr", async 
 	await handlers.get("session_shutdown")?.({ reason: "quit" }, context("重命名", "rpc"));
 	expect(herdr.requests).toHaveLength(0);
 
-	expect((await register(herdr.path, { FIRECODE_MASTER_WORKER: "1" })).size).toBe(0);
+	expect((await register(herdr.path, {}, true)).size).toBe(0);
 	expect((await register(herdr.path, { HERDR_ENV: undefined })).size).toBe(0);
 	expect(herdr.requests).toHaveLength(0);
 });

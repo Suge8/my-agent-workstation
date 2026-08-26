@@ -37,11 +37,10 @@ export interface ReviewConfig {
 	maxRounds: number;
 	/** 连续几轮失败触发顾问仲裁。 */
 	advisorAfterFailures: number;
-	/** 单个审查者 / 顾问子进程超时（分钟）。 */
+	/** 单个审查者 / 顾问会话超时（分钟）。 */
 	timeoutMinutes: number;
 	/** 审查者只读工具白名单。 */
 	tools: string[];
-	background: { command: string };
 	language: Language;
 }
 
@@ -56,6 +55,19 @@ export interface MasterModel {
 
 export interface MasterConfig {
 	models: MasterModel[];
+	workerExcludeExtensions: string[];
+	autoActivate: boolean;
+}
+
+/** 观察员喂给观察会话的增量粒度：minimal 省略 reasoning 与 diff 正文。 */
+export type WatcherContext = "minimal" | "full";
+
+/** Watcher 观察员配置：模型与 thinking 必须显式配置，绝不回退默认模型。 */
+export interface WatcherConfig {
+	enabled: boolean;
+	model: string;
+	thinking: ThinkingLevelValue;
+	context: WatcherContext;
 }
 
 export const FEATURES = [
@@ -71,6 +83,7 @@ export const FEATURES = [
 	"bark",
 	"review",
 	"master",
+	"watcher",
 ] as const;
 
 export type Feature = (typeof FEATURES)[number];
@@ -93,6 +106,7 @@ export interface FireCodeConfig {
 	presets: Record<string, Preset>;
 	review: ReviewConfig;
 	master: MasterConfig;
+	watcher: WatcherConfig;
 }
 
 export type LoadedConfig = {
@@ -204,8 +218,14 @@ export function loadConfig(): LoadedConfig {
 	if (raw.master !== undefined && !isPlainObject(raw.master))
 		problems.push("master 必须是对象");
 	const master = parseMasterConfig(asRecord(raw.master), problems);
+	// watcher 同理：缺节或模型有误时功能拒绝启动，静默回退会拿用户没配的模型真实发起观察。
+	const watcherProblems: string[] = [];
+	if (raw.watcher !== undefined && !isPlainObject(raw.watcher))
+		watcherProblems.push("watcher 必须是对象");
+	const watcher = parseWatcherConfig(asRecord(raw.watcher), watcherProblems);
+	if (raw.watcher !== undefined || features.watcher !== false) problems.push(...watcherProblems);
 
-	cached = { config: { features, keys, presets, review, master }, problems };
+	cached = { config: { features, keys, presets, review, master, watcher }, problems };
 	return cached;
 }
 
@@ -218,7 +238,6 @@ const REVIEW_KEYS = new Set([
 	"advisorAfterFailures",
 	"timeoutMinutes",
 	"tools",
-	"background",
 	"language",
 ]);
 const DEFAULT_TOOLS = ["read", "grep", "find", "ls", "bash"];
@@ -236,8 +255,12 @@ const LANGUAGES = new Set<Language>(["zh", "en"]);
 
 /** 导出供测试：严格拒绝未知字段（含嵌套），类型错误一律记录而非静默回退。 */
 export function parseReviewConfig(raw: Record<string, unknown>, problems: string[]): ReviewConfig {
-	for (const key of Object.keys(raw))
-		if (!REVIEW_KEYS.has(key)) problems.push(`未知字段 review.${key}`);
+	for (const key of Object.keys(raw)) {
+		if (REVIEW_KEYS.has(key)) continue;
+		problems.push(key === "background"
+			? "review.background 已随审查子进程层删除，请直接移除该键"
+			: `未知字段 review.${key}`);
+	}
 	for (const key of REVIEW_KEYS)
 		if (!(key in raw)) problems.push(`review.${key} 必须显式配置`);
 	const advisor = reviewModel(raw.advisor, "review.advisor", EMPTY_REVIEW_MODEL, problems);
@@ -249,7 +272,6 @@ export function parseReviewConfig(raw: Record<string, unknown>, problems: string
 		advisorAfterFailures: reviewInt(raw.advisorAfterFailures, "review.advisorAfterFailures", 2, 1, 5, problems),
 		timeoutMinutes: reviewInt(raw.timeoutMinutes, "review.timeoutMinutes", 20, 1, 60, problems),
 		tools: reviewTools(raw.tools, problems),
-		background: { command: reviewBackground(raw.background, problems) },
 		language: reviewLanguage(raw.language, problems),
 	};
 }
@@ -324,37 +346,40 @@ function reviewTools(value: unknown, problems: string[]): string[] {
 	return tools.length > 0 ? tools : [...DEFAULT_TOOLS];
 }
 
-function reviewBackground(value: unknown, problems: string[]): string {
-	if (value === undefined) return "pi";
-	if (typeof value !== "object" || value === null || Array.isArray(value)) {
-		problems.push("review.background 必须是对象");
-		return "pi";
-	}
-	const record = asRecord(value);
-	rejectUnknownKeys(record, ["command"], "review.background", problems);
-	const command = record.command;
-	if (typeof command !== "string" || command.length === 0) {
-		problems.push("review.background.command 必须是非空字符串");
-		return "pi";
-	}
-	return command;
-}
-
 // ---- master 节 ----
 
 /** 导出供测试：与 review 节同样严格拒绝未知字段，类型错误记录而非静默回退。 */
 export function parseMasterConfig(raw: Record<string, unknown>, problems: string[]): MasterConfig {
 	for (const key of Object.keys(raw))
-		if (key !== "models") problems.push(`未知字段 master.${key}`);
-	if (raw.models === undefined) return { models: [] };
+		if (key !== "models" && key !== "workerExcludeExtensions" && key !== "autoActivate")
+			problems.push(`未知字段 master.${key}`);
+	const exclusions = stringArray(raw.workerExcludeExtensions, "master.workerExcludeExtensions", problems);
+	const autoActivate = booleanValue(raw.autoActivate, "master.autoActivate", true, problems);
+	if (raw.models === undefined) return { models: [], workerExcludeExtensions: exclusions, autoActivate };
 	if (!Array.isArray(raw.models) || raw.models.length === 0 || raw.models.length > 8) {
 		problems.push("master.models 必须包含 1–8 个模型");
-		return { models: [] };
+		return { models: [], workerExcludeExtensions: exclusions, autoActivate };
 	}
 	const models = raw.models.map((item, index) => masterModel(item, `master.models[${index}]`, problems));
 	if (new Set(models.map((entry) => entry.model)).size !== models.length)
 		problems.push("master.models 模型不能重复");
-	return { models };
+	return { models, workerExcludeExtensions: exclusions, autoActivate };
+}
+
+function booleanValue(value: unknown, field: string, fallback: boolean, problems: string[]): boolean {
+	if (value === undefined) return fallback;
+	if (typeof value === "boolean") return value;
+	problems.push(`${field} 必须是 true 或 false`);
+	return fallback;
+}
+
+function stringArray(value: unknown, field: string, problems: string[]): string[] {
+	if (value === undefined) return [];
+	if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !item)) {
+		problems.push(`${field} 必须是非空字符串数组`);
+		return [];
+	}
+	return [...new Set(value)];
 }
 
 function masterModel(value: unknown, field: string, problems: string[]): MasterModel {
@@ -374,6 +399,31 @@ function masterModel(value: unknown, field: string, problems: string[]): MasterM
 		else problems.push(`${field}.use 必须是非空字符串`);
 	}
 	return { model, thinking, use };
+}
+
+// ---- watcher 节 ----
+
+const WATCHER_KEYS = ["enabled", "model", "thinking", "context"] as const;
+const WATCHER_CONTEXTS = new Set<WatcherContext>(["minimal", "full"]);
+
+/** 导出供测试：model/thinking 必填，enabled 默认 true、context 默认 minimal。 */
+export function parseWatcherConfig(raw: Record<string, unknown>, problems: string[]): WatcherConfig {
+	rejectUnknownKeys(raw, WATCHER_KEYS, "watcher", problems);
+	const enabled = booleanValue(raw.enabled, "watcher.enabled", true, problems);
+	const model = typeof raw.model === "string" && raw.model ? raw.model : "";
+	if (!model) problems.push("watcher.model 必须显式配置为非空字符串");
+	let thinking: ThinkingLevelValue | undefined;
+	if (raw.thinking === undefined) problems.push("watcher.thinking 必须显式配置");
+	else if (typeof raw.thinking === "string" && THINKING_LEVELS.has(raw.thinking as ThinkingLevelValue))
+		thinking = raw.thinking as ThinkingLevelValue;
+	else problems.push("watcher.thinking 值无效");
+	let context: WatcherContext = "minimal";
+	if (raw.context !== undefined) {
+		if (typeof raw.context === "string" && WATCHER_CONTEXTS.has(raw.context as WatcherContext))
+			context = raw.context as WatcherContext;
+		else problems.push("watcher.context 必须是 minimal 或 full");
+	}
+	return { enabled, model, thinking: thinking ?? "low", context };
 }
 
 function reviewLanguage(value: unknown, problems: string[]): Language {
