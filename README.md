@@ -30,9 +30,9 @@ Agent 会诊断当前环境、展示计划，并接手其余配置。只有模�
 - Pi、Herdr、FireCode、现役 Skills 与 Architecture Wiki；
 - BCU 桌面控制和隔离浏览器自动化；
 - Ghostty、Starship、Fastfetch、Zsh 自动建议与语法高亮；
-- 根据已认证供应商生成的模型循环、快捷预设、Review 与 Master 配置。
+- 根据已认证供应商生成的模型循环、快捷预设、Review、Master 与 Watcher 配置。
 
-以后直接告诉 Agent“检查工作站”“更新工作站”或“修复工作站”即可。所有动作始终收口到同一个 `setup` 控制面。
+Watcher 默认在每个主会话回合后调用推荐模型；OpenAI priority 默认开启并按供应商规则加价。不接受额外调用时，可在模型选择中禁用 Watcher。以后直接告诉 Agent“检查工作站”“更新工作站”或“修复工作站”即可，所有动作始终收口到同一个 `setup` 控制面。
 
 ## 安全与保留
 

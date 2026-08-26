@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const RECOMMENDED_PROFILE = resolve(ROOT, "resources/models/recommended.json");
-const CAPABILITIES = new Set(["presets", "master", "review"]);
+const CAPABILITIES = new Set(["presets", "master", "review", "watcher"]);
 
 function object(value, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} 必须是对象`);
@@ -158,6 +158,9 @@ export function renderModelProfile({
       );
   features.review = Boolean(advisor && reviewers.length);
 
+  const watcher = disabled.has("watcher") ? null : resolveAlias(profile.watcher.model);
+  features.watcher = Boolean(watcher);
+
   const nextFirecode = {
     ...currentFirecode,
     features,
@@ -173,6 +176,9 @@ export function renderModelProfile({
           reviewers,
         }
       : withoutModelFields(currentFirecode.review, ["advisor", "reviewers"]),
+    watcher: features.watcher
+      ? { ...object(currentFirecode.watcher ?? {}, "FireCode watcher"), ...profile.watcher, model: watcher.ref }
+      : withoutModelFields(currentFirecode.watcher, ["model"]),
   };
   return { piSettings: settings, piKeybindings: keybindings, firecode: nextFirecode };
 }

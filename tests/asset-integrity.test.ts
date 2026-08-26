@@ -132,13 +132,15 @@ test("FireCode 通过现有 loader 接缝可加载", async () => {
 	expect(typeof module.default).toBe("function");
 });
 
-test("FireCode 公开模板不会启用需要认证或模型配置的能力", async () => {
+test("FireCode 公开模板启用推荐工作流但保持 Bark 关闭", async () => {
 	const loader = await import("../packages/firecode/tests/loader.ts");
 	firecodeLoader = loader;
 	const module = await loader.loadFirecodeModule("config.ts", {
 		configJsonc: await readFile(join(FIRECODE, "config.example.jsonc"), "utf8"),
 	});
-	const loaded = (module.loadConfig as () => { config: { features: Record<string, boolean> } })();
-	for (const feature of ["claudeSub", "openaiNative", "master", "review"])
-		expect(loaded.config.features[feature]).toBe(false);
+	const loaded = (module.loadConfig as () => { config: { features: Record<string, boolean>; watcher: { enabled: boolean } } })();
+	for (const feature of ["claudeSub", "openaiNative", "master", "review", "watcher"])
+		expect(loaded.config.features[feature]).toBe(true);
+	expect(loaded.config.features.bark).toBe(false);
+	expect(loaded.config.watcher.enabled).toBe(true);
 });

@@ -38,9 +38,10 @@ pi 的个人定制层：启动横幅、底部状态栏、工具行渲染、预�
 ## 配置
 
 唯一运行配置是 Pi Agent 目录（由官方 `getAgentDir()` 解析，含 `PI_CODING_AGENT_DIR` 覆写）下的
-`extensions/firecode/config.jsonc`；安装流程当场生成完整私人配置。私人运行配置的运行默认是功能全开；公开的
-`config.example.jsonc` 采用安全默认，仅开启纯本地界面与会话功能，依赖个人认证的功能默认关闭。配置模板只是
-起始样例，不参与运行时读取。缺失运行配置时关闭可选功能，并在每次 `session_start` 警告一次；运行中补上配置也需重启 Pi 才生效。
+`extensions/firecode/config.jsonc`；安装流程当场生成完整私人配置。公开的 `config.example.jsonc` 是维护者当前的
+完整推荐配置：除 Bark 外功能全开，Master 与 Watcher 在新会话自动激活；Watcher 每回合调用模型，priority 按
+供应商规则加价。配置模板只是起始样例，不参与运行时读取。缺失运行配置时关闭可选功能，并在每次
+`session_start` 警告一次；运行中补上配置也需重启 Pi 才生效。
 
 不要新建 keys.json，也不要读项目级配置。快捷键启动时绑定，改完需重启；`ctrl+f` 只改 `openai` 节，其它注释
 保留。未知字段、嵌套未知字段与类型错误都报配置问题；`review`、`master` 与 `watcher` 节有问题时对应功能

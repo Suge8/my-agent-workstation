@@ -50,9 +50,10 @@ async function writeRestored(path, value, absentBeforeInstall) {
 }
 
 const FIRECODE_PATHS = [
-	...["header", "statusbar", "tools", "presets", "rename", "stats", "claudeSub", "openaiNative", "workingFlame", "bark", "review", "master"].map((name) => ["features", name]),
+	...["header", "statusbar", "tools", "presets", "rename", "stats", "claudeSub", "openaiNative", "workingFlame", "bark", "review", "master", "watcher"].map((name) => ["features", name]),
 	["openai", "nativeCompaction"], ["openai", "providers", "openai-codex", "textVerbosity"], ["openai", "providers", "openai-codex", "priority"], ["openai", "providers", "xai", "priority"],
 	["keys", "rename"], ["keys", "cyclePreset"], ["keys", "fast"], ["master", "models"], ["review", "advisor"], ["review", "reviewers"],
+	["watcher", "enabled"], ["watcher", "model"], ["watcher", "thinking"], ["watcher", "context"],
 ];
 
 function valueAt(object, path) {
@@ -203,6 +204,7 @@ function baseConfiguration(profile, providers, settings, keybindings, firecode) 
 				bark: false,
 				review: false,
 				master: false,
+				watcher: false,
 			},
 			keys: { ...(firecode.keys ?? {}), ...profile.firecodeKeys },
 		},

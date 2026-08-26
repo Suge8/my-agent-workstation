@@ -75,6 +75,19 @@ test("生成完整 Pi、预设及当前公开 FireCode roster", () => {
     { model: "anthropic/claude-opus-5", thinking: "medium" },
     { model: "openai-codex/gpt-5.6-sol", thinking: "medium" },
   ]);
+  assert.deepEqual(result.firecode.watcher, {
+    enabled: true,
+    model: "openai-codex/gpt-5.6-sol",
+    thinking: "low",
+    context: "minimal",
+  });
+  assert.equal(result.firecode.features.watcher, true);
+});
+
+test("watcher 可显式禁用且不会保留模型", () => {
+  const result = render({ selections: { disabled: ["watcher"] } });
+  assert.equal(result.firecode.features.watcher, false);
+  assert.equal(result.firecode.watcher.model, undefined);
 });
 
 test("provider 缺失时必须显式替换或设 null", () => {

@@ -11,8 +11,8 @@
     "gemini": null
   },
   "default": "openai-codex/gpt-5.6-sol",
-  "disabled": ["review"]
+  "disabled": ["review", "watcher"]
 }
 ```
 
-`models` 的键必须来自推荐档；值是 `provider/model`，`null` 表示禁用该别名。`disabled` 只接受 `presets`、`master`、`review`。安装器会保存这份不含凭据的选择并在更新时复用；模型不可用或供应商未认证时拒绝写入。
+`models` 的键必须来自推荐档；值是 `provider/model`，`null` 表示禁用该别名。`disabled` 只接受 `presets`、`master`、`review`、`watcher`。Watcher 默认在每个主会话回合后调用推荐模型；不接受额外调用时应显式禁用。安装器会保存这份不含凭据的选择并在更新时复用；模型不可用或供应商未认证时拒绝写入。

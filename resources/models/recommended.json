@@ -44,6 +44,7 @@
     "k3-256": { "model": "k3-256", "thinkingLevel": "high", "key": "alt+6" },
     "xai": { "model": "xai", "thinkingLevel": "high", "key": "alt+7" }
   },
+  "watcher": { "enabled": true, "model": "sol", "thinking": "low", "context": "minimal" },
   "master": [
     { "model": "sol", "thinking": "medium", "use": "常规调研与实现、调试" },
     { "model": "gemini", "thinking": "high", "use": "快速轻量调研" },
