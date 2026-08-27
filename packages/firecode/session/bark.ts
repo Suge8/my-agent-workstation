@@ -58,11 +58,6 @@ export function hasPendingDisposition(statePath: string): boolean {
 	}
 }
 
-/** 供 Watcher 的 blocker 唤起同步推送；未配置 bark-key 时静默跳过。 */
-export function pushBark(input: { title: string; body: string; group: string; sessionId: string }): void {
-	void sendBark(buildBarkPayload({ ...input, awaitingDecision: false }));
-}
-
 export function registerBark(pi: ExtensionAPI, subsession = false): void {
 	// 通知只归指挥官会话。
 	if (subsession) return;

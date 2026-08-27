@@ -1,8 +1,7 @@
 /**
- * Watcher 观察员：每个 turn 结束后异步评估主会话增量，按 nit/concern/blocker 三档投递建议。
+ * Watcher 观察员：每个 turn 结束后异步评估主会话增量，要么沉默，要么发一条建议。
  * 与 Master、fire-review 各自独立注册；观察过程不落盘。
  */
-import { basename } from "node:path";
 import type { Model } from "@earendil-works/pi-ai";
 import {
 	getAgentDir,
@@ -11,13 +10,12 @@ import {
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { loadConfig, type WatcherConfig } from "../config.js";
+import { deliver } from "../deliver.js";
 import { formatModelName } from "../format.js";
 import { InProcessSessionPool } from "../master/spawn.js";
-import { pushBark } from "../session/bark.js";
 import {
 	adviceMessage,
 	registerWatcherCardRenderer,
-	WATCHER_CARD_TYPE,
 	WATCHER_MESSAGE_TYPE,
 	type WatcherCard,
 } from "./card.js";
@@ -33,13 +31,10 @@ interface WatcherDependencies {
 	resolveModel?: (id: string) => Promise<Model<any>>;
 	pool?: InProcessSessionPool;
 	createObserver?: typeof createObserver;
-	pushBark?: typeof pushBark;
 }
 
 interface WatcherRuntime {
 	ctx: ExtensionContext;
-	/** 用户 esc 中断过的现场：人的接管权压倒一切，观察员不得自动插话。 */
-	interrupted: boolean;
 	pending: string[];
 	lastTurnIndex: number;
 	evaluating: boolean;
@@ -88,31 +83,14 @@ export function registerWatcher(
 			runtime.ctx = ctx;
 			return runtime;
 		}
-		runtime = { ctx, pending: [], lastTurnIndex: 0, evaluating: false, interrupted: false };
+		runtime = { ctx, pending: [], lastTurnIndex: 0, evaluating: false };
 		ctx.ui.setStatus("watcher", ctx.ui.theme.fg("dim", `👓 ${formatModelName(config.model)}/${config.thinking}`));
 		return runtime;
 	};
-	const deliver = (active: WatcherRuntime, advice: Advice, turnIndex: number) => {
-		const card: WatcherCard = { severity: advice.severity, note: advice.note, turnIndex };
-		// nit 只出卡：自定义 entry 不进入模型上下文，不打断任何回合。
-		// esc 中断过的现场同样只出卡：人已接管，建议等着被看而不插进下一个回合。
-		if (card.severity === "nit" || active.interrupted) {
-			pi.appendEntry<WatcherCard>(WATCHER_CARD_TYPE, card);
-			return;
-		}
-		// blocker 在指挥官空闲时自己唤起一个回合，否则 steer 等当前回合接住。
-		const wake = card.severity === "blocker" && active.ctx.isIdle?.() === true;
-		pi.sendMessage<WatcherCard>(
-			{ customType: WATCHER_MESSAGE_TYPE, content: adviceMessage(card), display: true, details: card },
-			{ deliverAs: "steer", triggerTurn: wake },
-		);
-		if (!wake) return;
-		(dependencies.pushBark ?? pushBark)({
-			title: `👓 观察员·${pi.getSessionName?.() || basename(active.ctx.cwd)}`,
-			body: card.note,
-			group: basename(active.ctx.cwd),
-			sessionId: active.ctx.sessionManager.getSessionId(),
-		});
+	// 与指挥官事件同构：忙时卡片经 steer 队列句缝追加，歇透时走前门唤起（见 deliver.ts）。
+	const speak = (active: WatcherRuntime, advice: Advice, turnIndex: number) => {
+		const card: WatcherCard = { note: advice.note, turnIndex };
+		return deliver(pi, active.ctx, { customType: WATCHER_MESSAGE_TYPE, content: adviceMessage(card), details: card });
 	};
 	const evaluate = async (active: WatcherRuntime) => {
 		active.evaluating = true;
@@ -131,7 +109,7 @@ export function registerWatcher(
 				});
 				const advice = await active.observer.evaluate(increment);
 				if (current !== era) continue;
-				if (advice && runtime === active) deliver(active, advice, turnIndex);
+				if (advice && runtime === active) await speak(active, advice, turnIndex);
 				// 自身上下文快满时也重新入场：观察员只需要当下，不需要完整历史。
 				if ((active.observer?.contextPercent() ?? 0) >= CONTEXT_RESET_PERCENT) resetObserver();
 			}
@@ -188,13 +166,6 @@ export function registerWatcher(
 
 	// 主会话压缩：旧增量已不再对应主会话现场，观察员从当前尾部重新入场而不回放。
 	pi.on("session_compact", () => resetObserver());
-
-	pi.on("agent_start", () => {
-		if (runtime) runtime.interrupted = false;
-	});
-	pi.on("agent_end", (event) => {
-		if (runtime && event.messages.at(-1)?.stopReason === "aborted") runtime.interrupted = true;
-	});
 	pi.on("session_shutdown", () => deactivate());
 }
 

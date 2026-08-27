@@ -23,6 +23,8 @@ reload/new/resume/fork 保留可恢复状态，quit 才落终态。checkpoint �
 不烧总结回合。修复反馈、总结提示与状态卡 content 统一包在 `<firecode_review>` 中，details 保持原始卡片数据。
 占用标签持有到总结完成，Master 的审查等待自然捕获总结作为最终回复。
 
+已知暴露：修复反馈与总结提示的 followUp 唤起仍走宿主侧门（跳过 before_agent_start，#33 上游缺陷），修复回合内系统提示注入会抖动一次；因 display:false 的隐形投递无前门等价物，接受此暴露待上游修复，不在插件侧绕行。
+
 `outcome.ts` 是外部读取终态判定的唯一入口，checkpoint 格式仍归 review 所有。
 
 ## 卡片与活动条

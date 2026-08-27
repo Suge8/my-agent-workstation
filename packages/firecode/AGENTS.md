@@ -4,9 +4,9 @@ pi 的个人定制层：启动横幅、底部状态栏、工具行渲染、预�
 对抗性审查、默认激活的 `/fire-master` 多 Agent 主控与 `/fire-watch` 观察员。
 
 单一入口 `index.ts` 只做一件事：按 `config.features` 逐个调 `registerX(pi)`。每个 register 封闭自己的运行
-状态，关掉任何一个不影响其余；跨模块接缝只有七条：Master 只读调 `review/outcome.ts`，bark 只读调
+状态，关掉任何一个不影响其余；跨模块接缝只有六条：Master 只读调 `review/outcome.ts`，bark 只读调
 `master/state.ts` 的持久化状态，Master 复用 `tools/line.ts` 纯渲染组件画自己的工具行，Review 与 Watcher 经
-`master/spawn.ts` 起子会话，Watcher 订阅 review 发布的占用频道判静默、blocker 唤起时调 `session/bark.ts` 推送。
+`master/spawn.ts` 起子会话，Watcher 订阅 review 发布的占用频道判静默。
 
 ## 模块
 
@@ -18,10 +18,11 @@ pi 的个人定制层：启动横幅、底部状态栏、工具行渲染、预�
 | `session/` | 预设、`/rename`、`/tokens`、Bark 通知、herdr 身份投影、工作火焰 | [session/AGENTS.md](session/AGENTS.md) |
 | `review/` | `/fire-review` 对抗性审查：多模型并行审、顾问仲裁、checkpoint、结果卡、活动条 | [review/AGENTS.md](review/AGENTS.md) |
 | `master/` | `/fire-master`：进程内 Worker 池、七命令与独立查询、当前动作投影、steer 投递与审查义务 | [master/AGENTS.md](master/AGENTS.md) |
-| `watcher/` | `/fire-watch` 观察员：turn 增量评估与 nit/concern/blocker 三档投递 | [watcher/AGENTS.md](watcher/AGENTS.md) |
+| `watcher/` | `/fire-watch` 观察员：turn 增量评估与单通道发言 | [watcher/AGENTS.md](watcher/AGENTS.md) |
 | `provider/claude-sub.ts` | Anthropic OAuth 请求补 Claude Code 归因头 | |
 | `provider/openai-native/` | 请求层：OpenAI verbosity、OpenAI/xAI Fast（service_tier=priority）、可选原生压缩 | |
 | `flame-frames.ts` | 品牌火焰帧素材（任意高度缩放），供审查活动框与 working 火焰共用 | |
+| `deliver.ts` | Master 事件与观察员发言共用的统一投递入口：忙时卡片经 steer 队列，闲时前门唤起 | |
 | `herdr-client.ts` | herdr socket 短连接客户端，herdr-display 与 review 占用标签共用 | |
 | `format.ts` `theme.ts` | 共享的宽度/文本格式化与品牌配色、阈值分级 | |
 | `config.ts` | 从 Pi Agent 目录解析唯一运行配置 | |
@@ -32,6 +33,8 @@ pi 的个人定制层：启动横幅、底部状态栏、工具行渲染、预�
 
 带背景的卡片里禁用 pi-tui `TruncatedText`/`truncateToWidth`：其省略号带 `\x1b[0m` 全量重置，会在截断点掐断
 外层背景色（上游 #4894 已报被拒修）；单行截断一律用 `format.ts` 的 `clip`。
+
+投递统一经根级 `deliver.ts`：宿主流式中投卡片经 steer 队列，会话歇透时走 `sendUserMessage` 前门唤起。两条红线都是事故换来的：回合进行中以 `triggerTurn: false` 立即追加会造成快照与状态分叉、提示词缓存整段重写（#28）；以 `triggerTurn: true` 唤起歇透会话会跳过 `before_agent_start`，系统提示注入随回合抖动同样整段重写（#33，宿主缺陷，已报上游）。忙闲判断与发送必须同一事件循环节拍内完成，中间禁止 await。
 
 `tools/grouping.ts` 依赖 pi 内部组件树与原型 patch，是与宿主耦合最紧的一处，升级 pi 时优先检查。
 

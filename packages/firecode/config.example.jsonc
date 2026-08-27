@@ -32,7 +32,7 @@
 		}
 	},
 
-	// 每个主会话回合后评估新增内容，会产生额外模型调用。
+	// 每个主会话回合后评估新增内容，会产生额外模型调用；需要开口时当场插话。
 	"watcher": {
 		"enabled": true,
 		"model": "openai-codex/gpt-5.6-sol",
@@ -49,11 +49,6 @@
 				"model": "openai-codex/gpt-5.6-sol",
 				"thinking": "medium",
 				"use": "默认使用，常规实现/调试（速度快，偏 Debug 或纯执行，但容易过度工程过度测试）"
-			},
-			{
-				"model": "antigravity/gemini-3.7-flash",
-				"thinking": "high",
-				"use": "大规模并行，便宜，适合调研任务，不适合实现"
 			},
 			{
 				"model": "openai-codex/gpt-5.6-luna",

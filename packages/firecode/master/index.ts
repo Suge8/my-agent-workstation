@@ -13,6 +13,7 @@ import {
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { loadConfig, type MasterModel } from "../config.js";
+import { deliver } from "../deliver.js";
 import { formatDuration } from "../format.js";
 import { readReviewOutcome, type ReviewOutcome } from "../review/outcome.js";
 import { ToolLine, makeResultRenderer } from "../tools/line.js";
@@ -79,7 +80,6 @@ interface MasterRuntime {
 	reviewProgress: Map<string, ReviewProgress>;
 	observedSessions: Map<string, ObservedSession>;
 	flushTimer?: NodeJS.Timeout;
-	turnActive: boolean;
 }
 
 export function registerMaster(
@@ -134,7 +134,6 @@ export function registerMaster(
 			idleSince: new Map(),
 			reviewProgress: new Map(),
 			observedSessions: new Map(),
-			turnActive: false,
 		};
 		setTools(true);
 		if (store.discardedLegacyVersion !== undefined)
@@ -161,29 +160,28 @@ export function registerMaster(
 		if (runtime !== active || !active.events.length) return;
 		const batch = active.events.splice(0);
 		const content = batch.map((event) => event.content).join("\n\n");
-		try {
-			pi.sendMessage(
-				{ customType: MASTER_EVENT_TYPE, content: masterEventEnvelope(content), display: true, details: masterEventDetails(batch.map((event) => event.content)) },
-				{ deliverAs: "steer", triggerTurn: !active.turnActive && active.ctx.isIdle?.() === true },
-			);
-		} catch (error) {
+		deliver(pi, active.ctx, {
+			customType: MASTER_EVENT_TYPE,
+			content: masterEventEnvelope(content),
+			details: masterEventDetails(batch.map((event) => event.content)),
+		}).then(() => {
+			try {
+				pi.appendEntry(EVENT_ACK_TYPE, { ids: batch.map((event) => event.id) });
+			} catch (error) {
+				active.ctx.ui.notify(`子代理结果确认写入失败，reload 后可能重复投递：${String(error)}`, "warning");
+			}
+			for (const event of batch) {
+				if (!event.worker) continue;
+				const worker = active.store.state.workers.find((candidate) => candidate.name === event.worker);
+				if (worker?.status === "idle" && worker.disposition !== "reminded")
+					active.store.dispatch({ type: "UPSERT_WORKER", worker: { ...worker, disposition: "pending" } });
+			}
+		}, (error) => {
 			active.events.unshift(...batch);
 			active.ctx.ui.notify(`子代理结果投递失败，将自动重试：${String(error)}`, "warning");
 			active.flushTimer = setTimeout(() => flushEvents(active), EVENT_RETRY_MS);
 			active.flushTimer.unref?.();
-			return;
-		}
-		try {
-			pi.appendEntry(EVENT_ACK_TYPE, { ids: batch.map((event) => event.id) });
-		} catch (error) {
-			active.ctx.ui.notify(`子代理结果确认写入失败，reload 后可能重复投递：${String(error)}`, "warning");
-		}
-		for (const event of batch) {
-			if (!event.worker) continue;
-			const worker = active.store.state.workers.find((candidate) => candidate.name === event.worker);
-			if (worker?.status === "idle" && worker.disposition !== "reminded")
-				active.store.dispatch({ type: "UPSERT_WORKER", worker: { ...worker, disposition: "pending" } });
-		}
+		});
 	};
 	const enqueueEvent = (
 		active: MasterRuntime,
@@ -395,7 +393,7 @@ export function registerMaster(
 			model: Type.Optional(Type.String({ description: "start 必填：从选型表选 provider/model；send 可传以原地切换，省略则沿用。" })),
 			thinking: Type.Optional(StringEnum(THINKING_LEVELS, { description: "start 必填；send 可传以原地切换思考档，省略则沿用。" })),
 			cwd: Type.Optional(Type.String({ description: "仅 start 可选：Worker 工作目录的绝对路径，默认当前目录。" })),
-			review: Type.Optional(Type.Boolean({ description: "start/send 的重要实现票设 true 以记录审查义务；完成后必须显式发起 review。" })),
+			review: Type.Optional(Type.Boolean({ description: "按审查纪律为 start/send 记录义务；true 不自动开审。" })),
 		}),
 		async execute(_id, params: Record<string, unknown>, _signal, _update, ctx) {
 			const active = runtime;
@@ -605,14 +603,6 @@ export function registerMaster(
 		}
 	});
 
-	pi.on("agent_start", () => {
-		if (runtime) runtime.turnActive = true;
-	});
-	pi.on("agent_settled", (_event, ctx) => {
-		if (!runtime) return;
-		runtime.ctx = ctx;
-		runtime.turnActive = false;
-	});
 	pi.on("session_shutdown", () => deactivate());
 }
 
@@ -774,14 +764,20 @@ function rosterText(models: MasterModel[]): string {
 	return models.map((entry) => `${entry.model}（${entry.use}，thinking ${entry.thinking}）`).join("；");
 }
 
+const REVIEW_DISCIPLINE = "审查纪律：默认省略 review；仅高影响或难以窄测证明的重要实现设 review:true，典型边界是安全权限、持久化/迁移、并发/状态机、公共/跨进程接口、构建发布；调查、文档、机械修改、局部低风险修复、纯重构、纯追问均为轻量。review:true 只记录持久义务，不自动开审；义务在 send/中断/失败后保留并阻止 ack，完成且验证通过后显式 review，审查通过或质量裁决停止后消除义务；未挂义务的 idle Worker 仍可补审；拿不准先省略。";
+
 function masterGuidelines(models: MasterModel[]): string[] {
 	return [
 		"subagents 激活时，你是唯一的指挥官（Master），负责委派与最终验收。",
-		`选型表：${rosterText(models)}。start 必须显式传 model 与 thinking。`,
-		"哨兵纪律：CI watch、部署观察、长测试等会占住回合的等待类任务，派最便宜模型的哨兵票盯守，结果会自动送达。",
+		`选型表：${rosterText(models)}。start 必须显式传 model 与 thinking；thinking 取表内默认档，仅用户显式指示时偏离。`,
+		"哨兵纪律：以等待为主的盯守（CI、部署、长测试）派最便宜档哨兵票。",
+		"动手边界：指挥官亲手只做三类事——读取与收割、数条命令内可得决定性证据的快速取证、终审 diff 与交付裁决；其余执行与验证一律派票，模型按选型表就任务所需能力选档；dogfood 亦然——执行派票，裁决亲手。",
+		"并行纪律：相互无阻塞边的工作默认并行派发；共享 checkout 时按路径划界，工作说明写明各自触碰的目录。",
+		"工单纪律：项目存在工单库时，派工前按其约定认领，新工单由指挥官决策开立；无工单库则以用户验收为交付边界。",
 		"收割纪律：调查/哨兵票收割要点后立即 kill；实现票保留待收口。",
 		"计划维护纪律：计划产物存在时，其维护责任随指挥权归指挥官。",
 		"投递纪律：子代理结果、中断与审查终态都会自动送达你的回合，无需也不要用 list/tail 轮询进度；tail 只用于按需读取执行细节。",
+		REVIEW_DISCIPLINE,
 		'调用样板：start {"worker":"fix-auth","model":"provider/model","thinking":"medium","prompt":"自包含工作说明"}。',
 	];
 }
