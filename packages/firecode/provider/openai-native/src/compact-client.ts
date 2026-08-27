@@ -199,10 +199,6 @@ function parseResponseOutput(responseText: string):
 		: { ok: false, reason: "malformed-response" };
 }
 
-function estimateSerializedTokens(value: unknown): number {
-	return Math.ceil(JSON.stringify(value).length / 4);
-}
-
 function isRetainedInputItem(value: unknown): value is Record<string, unknown> {
 	return isRecord(value) && (value.role === "user" || value.role === "developer" || value.role === "system");
 }
@@ -298,17 +294,9 @@ export async function executeNativeCompaction(args: {
 	}
 
 	try {
+		// 输入是否超窗由服务端裁决（context_length_exceeded → input-too-large）：
+		// 本地字符估算既不准也是第二事实源，历史上曾把正常触发线（窗口 − 预留）上的压缩全部误拒。
 		const input = [...request.input, COMPACTION_TRIGGER];
-		const inputTokens = estimateSerializedTokens(request.instructions) + estimateSerializedTokens(input);
-		const outputReserve = runtime.currentModel.maxTokens;
-		const contextWindow = runtime.currentModel.contextWindow;
-		if (inputTokens + outputReserve > contextWindow) {
-			return {
-				ok: false,
-				reason: "input-too-large",
-				detail: `estimated input exceeds the model context window (${inputTokens} input + ${outputReserve} output reserve > ${contextWindow} tokens)`,
-			};
-		}
 		const response = await fetch(runtime.responsesUrl, {
 			method: "POST",
 			headers: buildHeaders(runtime),

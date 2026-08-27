@@ -1018,7 +1018,7 @@ test("native replay runs before configured Responses options", async () => {
 });
 
 test("an over-window native compaction reports its full terminal failure without falling back", async () => {
-	const detail = "estimated input exceeds the model context window (120001 input + 128000 output reserve > 200000 tokens)";
+	const detail = '{"code":"context_length_exceeded","message":"Your input exceeds the context window of this model."}';
 	const { sessionBeforeCompact, compactCalls } = await loadHookHarness({
 		compactResult: { ok: false, reason: "input-too-large", detail },
 	});

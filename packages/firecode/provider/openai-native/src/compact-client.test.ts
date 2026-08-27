@@ -172,29 +172,6 @@ test("executeNativeCompaction accepts a streamed responses payload", async () =>
 	});
 });
 
-test("executeNativeCompaction rejects an over-window request without fetching", async () => {
-	const fetchMock = mock(async () => new Response());
-	globalThis.fetch = fetchMock as typeof fetch;
-
-	const result = await executeNativeCompaction({
-		runtime: createRuntime({
-			currentModel: { ...baseModel, contextWindow: 100, maxTokens: 20 },
-		}),
-		request: {
-			model: baseModel.id,
-			instructions: "compact this",
-			input: [{ role: "user", content: "x".repeat(400) }],
-		},
-	});
-
-	expect(result).toEqual({
-		ok: false,
-		reason: "input-too-large",
-		detail: "estimated input exceeds the model context window (119 input + 20 output reserve > 100 tokens)",
-	});
-	expect(fetchMock).not.toHaveBeenCalled();
-});
-
 test("executeNativeCompaction classifies a failed Responses event by its provider error", async () => {
 	globalThis.fetch = mock(async () =>
 		new Response(
