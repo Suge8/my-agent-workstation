@@ -56,7 +56,7 @@ async function copyTree(source, target, exclude = () => false, ancestors = new S
 }
 
 function assertManagedPathsClean(root) {
-	const paths = ["packages/firecode", "packages/skills", "packages/pi-config/SYSTEM.md", "resources/architecture-wiki"];
+	const paths = ["packages/firecode", "packages/skills", "packages/pi-config/SYSTEM.md"];
 	const result = spawnSync("git", ["status", "--porcelain", "--untracked-files=all", "--", ...paths], { cwd: root, encoding: "utf8" });
 	if (result.status !== 0) throw new Error(result.stderr.trim() || "无法检查发行快照状态");
 	if (result.stdout.trim()) throw new Error(`发行快照有未提交修改，已拒绝覆盖：\n${result.stdout.trim()}`);
@@ -126,14 +126,11 @@ export async function syncSources({ root = REPO, firecode, skills, architecture,
 	architecture = resolve(architecture);
 	system = resolve(system);
 	if (checkClean) assertManagedPathsClean(root);
-	for (const source of [firecode, skills, architecture, system, join(firecode, "config.example.jsonc"), join(architecture, "skills", "architecture-wiki"), join(architecture, "skills", "architecture-wiki-en")])
+	for (const source of [firecode, skills, architecture, system, join(firecode, "config.example.jsonc"), join(architecture, "skills", "architecture-wiki")])
 		if (!await exists(source)) throw new Error(`维护源不存在：${source}`);
 
 	const searchSkill = join(root, "packages", "skills", "search", "search");
-	const setupSkill = join(root, "packages", "skills", "operations", "workstation-setup");
-	for (const overlay of [searchSkill, setupSkill]) {
-		if (!await exists(overlay)) throw new Error(`Workstation Skill 不存在：${overlay}`);
-	}
+	if (!await exists(searchSkill)) throw new Error(`搜索 Skill 不存在：${searchSkill}`);
 	const commits = checkClean ? {
 		firecode: sourceCommit(firecode),
 		skills: sourceCommit(skills),
@@ -148,19 +145,14 @@ export async function syncSources({ root = REPO, firecode, skills, architecture,
 		await copyTree(firecode, join(next, "firecode"), (name) => name === "config.jsonc");
 		await copyTree(skills, join(next, "skills"));
 		await rm(join(next, "skills", "development", "architecture-wiki"), { recursive: true, force: true });
-		await copyTree(join(architecture, "skills", "architecture-wiki"), join(next, "architecture-zh"));
-		await copyTree(join(architecture, "skills", "architecture-wiki-en"), join(next, "architecture-en"));
+		await copyTree(join(architecture, "skills", "architecture-wiki"), join(next, "skills", "development", "architecture-wiki"));
 		await rm(join(next, "skills", "search", "search"), { recursive: true, force: true });
 		await copyTree(searchSkill, join(next, "skills", "search", "search"));
-		await rm(join(next, "skills", "operations", "workstation-setup"), { recursive: true, force: true });
-		await copyTree(setupSkill, join(next, "skills", "operations", "workstation-setup"));
 		await copyTree(system, join(next, "SYSTEM.md"));
-		await assertPublic([join(next, "firecode"), join(next, "skills"), join(next, "architecture-zh"), join(next, "architecture-en"), join(next, "SYSTEM.md")]);
+		await assertPublic([join(next, "firecode"), join(next, "skills"), join(next, "SYSTEM.md")]);
 		await replacePrepared(stage, [
 			["firecode", join(root, "packages", "firecode")],
 			["skills", join(root, "packages", "skills")],
-			["architecture-zh", join(root, "resources", "architecture-wiki", "zh")],
-			["architecture-en", join(root, "resources", "architecture-wiki", "en")],
 			["SYSTEM.md", join(root, "packages", "pi-config", "SYSTEM.md")],
 		]);
 	} finally {

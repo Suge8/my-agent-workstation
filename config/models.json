@@ -1,5 +1,4 @@
 {
-  "version": 1,
   "models": {
     "sol": { "provider": "openai-codex", "model": "gpt-5.6-sol" },
     "terra": { "provider": "openai-codex", "model": "gpt-5.6-terra" },
@@ -35,32 +34,6 @@
     "k3-256",
     "gemini"
   ],
-  "presets": {
-    "fable": { "model": "fable", "thinkingLevel": "medium", "key": "alt+1" },
-    "opus5": { "model": "opus5", "thinkingLevel": "medium", "key": "alt+2" },
-    "sol": { "model": "sol", "thinkingLevel": "medium", "key": "alt+3" },
-    "gemini": { "model": "gemini", "thinkingLevel": "high", "key": "alt+4" },
-    "ds": { "model": "ds-flash", "thinkingLevel": "high", "key": "alt+5" },
-    "k3-256": { "model": "k3-256", "thinkingLevel": "high", "key": "alt+6" },
-    "xai": { "model": "xai", "thinkingLevel": "high", "key": "alt+7" }
-  },
-  "watcher": { "enabled": true, "model": "sol", "thinking": "low", "context": "minimal" },
-  "master": [
-    { "model": "sol", "thinking": "medium", "use": "常规调研与实现、调试" },
-    { "model": "gemini", "thinking": "high", "use": "快速轻量调研" },
-    { "model": "luna", "thinking": "xhigh", "use": "大规模并行快任务" },
-    { "model": "opus5", "thinking": "medium", "use": "前端与综合架构" },
-    { "model": "fable", "thinking": "high", "use": "高级架构顾问" },
-    { "model": "k3-256", "thinking": "high", "use": "视觉设计" }
-  ],
-  "review": {
-    "advisor": { "model": "fable", "thinking": "high" },
-    "reviewers": [
-      { "model": "sonnet", "thinking": "medium" },
-      { "model": "opus5", "thinking": "medium" },
-      { "model": "sol", "thinking": "medium" }
-    ]
-  },
   "keybindings": {
     "app.model.cycleForward": ["shift+tab"],
     "app.thinking.cycle": ["tab"],
@@ -68,10 +41,5 @@
     "tui.editor.cursorWordRight": ["alt+right", "ctrl+right"],
     "tui.editor.cursorRight": ["right"],
     "app.session.rename": ["alt+r"]
-  },
-  "firecodeKeys": {
-    "rename": "ctrl+r",
-    "cyclePreset": "ctrl+shift+u",
-    "fast": "ctrl+f"
   }
 }

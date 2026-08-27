@@ -10,15 +10,18 @@
 
 ## 安装与权限
 
-工作站向导负责构建并安装本仓库内的 package：
+从仓库根目录构建并安装本 package，再从全局包安装原生 Helper：
 
 ```bash
-./setup apply --mode full --keep-system
+cd packages/better-computer-use
+npm install --ignore-scripts
+npm run build
+npm pack
+npm install --global --ignore-scripts ./<生成的 tgz>
+node "$(npm root -g)/better-computer-use/scripts/setup-helper.mjs" --runtime
 ```
 
-单独开发本 package 时运行 `npm install`、`npm run build`，再执行 `npm install -g .`。
-
-首次使用时，在“系统设置 → 隐私与安全性”中为 `/Applications/bcu.app` 授予“辅助功能”和“屏幕录制”权限。缺少权限时，`bcu doctor` 和实际命令会返回人工操作步骤；不会重置或绕过 macOS 授权。
+最后由用户本人运行 `bcu setup`，并在“系统设置 → 隐私与安全性”中为 `/Applications/bcu.app` 授予“辅助功能”和“屏幕录制”权限。缺少权限时，`bcu doctor` 和实际命令会返回人工操作步骤；不会重置或绕过 macOS 授权。
 
 ## 快速开始
 

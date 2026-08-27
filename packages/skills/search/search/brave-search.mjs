@@ -19,7 +19,7 @@ function usage(code = 0) {
 const args = process.argv.slice(2);
 if (args.length === 0 || args[0] === "-h" || args[0] === "--help") usage(args.length ? 0 : 1);
 if (!KEY) {
-	console.error("Brave 未配置：请运行 setup configure-search");
+	console.error('Brave 未配置：请运行 security add-generic-password -U -a "$USER" -s my-agent-workstation.brave -w <key>');
 	process.exit(1);
 }
 

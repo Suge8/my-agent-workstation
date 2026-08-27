@@ -122,7 +122,7 @@ Examples:
 
 async function post(path, body) {
   const apiKey = credential('EXA_API_KEY');
-  if (!apiKey) throw new Error('Exa 未配置：请运行 setup configure-search');
+  if (!apiKey) throw new Error('Exa 未配置：请运行 security add-generic-password -U -a "$USER" -s my-agent-workstation.exa -w <key>');
 
   const response = await fetch(`${API_ROOT}${path}`, {
     method: 'POST',

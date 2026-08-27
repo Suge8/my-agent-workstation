@@ -8,7 +8,8 @@ const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FIRECODE = join(REPO, "packages", "firecode");
 const SKILLS = join(REPO, "packages", "skills");
 const PI_CONFIG = join(REPO, "packages", "pi-config");
-const ARCHITECTURE = join(REPO, "resources", "architecture-wiki");
+const CONFIG = join(REPO, "config");
+const ARCHITECTURE = join(SKILLS, "development", "architecture-wiki");
 
 async function exists(path: string): Promise<boolean> {
 	try {
@@ -74,7 +75,7 @@ const SECRET_PATTERNS = [
 	/\b(?:api[_-]?key|access[_-]?token|secret[_-]?key|password)\s*[:=]\s*(?:"[A-Za-z0-9+/=_-]{16,}"|'[A-Za-z0-9+/=_-]{16,}')/i,
 ];
 
-const assetRoots = [FIRECODE, PI_CONFIG, SKILLS, ARCHITECTURE];
+const assetRoots = [CONFIG, FIRECODE, PI_CONFIG, SKILLS];
 let firecodeLoader: { cleanupFirecodeModules: () => Promise<void> } | undefined;
 
 afterAll(async () => {
@@ -92,9 +93,10 @@ test("发行包只包含允许的资产范围", async () => {
 	expect(await exists(join(FIRECODE, "CONTEXT.md"))).toBe(true);
 	expect(await exists(join(FIRECODE, "package.json"))).toBe(true);
 	expect(await exists(join(PI_CONFIG, "SYSTEM.md"))).toBe(true);
-	expect(await exists(join(SKILLS, "development", "architecture-wiki"))).toBe(false);
-	expect(await exists(join(ARCHITECTURE, "zh", "SKILL.md"))).toBe(true);
-	expect(await exists(join(ARCHITECTURE, "en", "SKILL.md"))).toBe(true);
+	expect(await exists(join(ARCHITECTURE, "SKILL.md"))).toBe(true);
+	expect(await exists(join(REPO, "resources"))).toBe(false);
+	expect(await exists(join(CONFIG, "models.json"))).toBe(true);
+	expect(await exists(join(CONFIG, "terminal", "ghostty.conf"))).toBe(true);
 	expect((await files(SKILLS)).filter((path) => basename(path) === "SKILL.md").length).toBeGreaterThan(0);
 });
 

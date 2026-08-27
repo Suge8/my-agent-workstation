@@ -6,7 +6,14 @@ compatibility: 需要 Node.js 18+；Brave/Exa 使用环境变量或工作站写�
 
 # Search
 
-按问题选择一个最窄后端，不为同一查询并行调用多个搜索源。命令中的脚本路径相对本 skill 目录，执行时解析为绝对路径。Brave 或 Exa 未配置时运行 `setup configure-search`，不要把密钥写入 Shell 配置。
+按问题选择一个最窄后端，不为同一查询并行调用多个搜索源。命令中的脚本路径相对本 skill 目录，执行时解析为绝对路径。Brave 或 Exa 未配置时把密钥存入 macOS 钥匙串：
+
+```bash
+security add-generic-password -U -a "$USER" -s my-agent-workstation.brave -w <key>
+security add-generic-password -U -a "$USER" -s my-agent-workstation.exa -w <key>
+security find-generic-password -w -a "$USER" -s my-agent-workstation.brave
+security find-generic-password -w -a "$USER" -s my-agent-workstation.exa
+```
 
 ## Brave：精确网页搜索
 

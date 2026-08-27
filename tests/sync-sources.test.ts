@@ -29,7 +29,7 @@ test("maintainer sync refuses to overwrite a dirty distribution snapshot", async
 		.rejects.toThrow("未提交修改");
 });
 
-test("maintainer sync mirrors independent FireCode and stages both Architecture variants", async () => {
+test("maintainer sync mirrors FireCode, Skills, and the Chinese Architecture Wiki", async () => {
 	const root = mkdtempSync(join(tmpdir(), "myaw-sync-"));
 	roots.push(root);
 	const sources = join(root, "sources");
@@ -54,14 +54,12 @@ test("maintainer sync mirrors independent FireCode and stages both Architecture 
 	mkdirSync(join(skills, "development"), { recursive: true });
 	symlinkSync(linkedSkill, join(skills, "development", "architecture-wiki"));
 	file(join(architecture, "skills", "architecture-wiki", "SKILL.md"), "中文资产\n");
-	file(join(architecture, "skills", "architecture-wiki-en", "SKILL.md"), "English asset\n");
 	file(system, "public system\n");
 	file(join(targetFirecode, "config.example.jsonc"), '{"old":true}\n');
 	file(join(targetFirecode, "AGENTS.md"), "public config guide\n");
 	file(join(targetFirecode, "tests", "loader.ts"), "portable loader\n");
 	file(join(targetFirecode, "orphan.ts"), "remove me\n");
 	file(join(targetSkills, "search", "search", "SKILL.md"), "keychain search\n");
-	file(join(targetSkills, "operations", "workstation-setup", "SKILL.md"), "distribution only\n");
 	file(join(targetSkills, "orphan", "SKILL.md"), "remove me\n");
 	expect(existsSync(join(targetFirecode, "tests", "loader.ts"))).toBe(true);
 
@@ -75,13 +73,11 @@ test("maintainer sync mirrors independent FireCode and stages both Architecture 
 	expect(existsSync(join(targetFirecode, "orphan.ts"))).toBe(false);
 	expect(readFileSync(join(targetSkills, "creative", "video", "SKILL.md"), "utf8")).toBe("Use the current project directory.\n");
 	expect(readFileSync(join(targetSkills, "creative", "video", "guide.md"), "utf8")).toContain("remotion.dev");
-	expect(existsSync(join(targetSkills, "development", "architecture-wiki"))).toBe(false);
-	expect(readFileSync(join(root, "resources", "architecture-wiki", "zh", "SKILL.md"), "utf8")).toBe("中文资产\n");
-	expect(readFileSync(join(root, "resources", "architecture-wiki", "en", "SKILL.md"), "utf8")).toBe("English asset\n");
+	expect(readFileSync(join(targetSkills, "development", "architecture-wiki", "SKILL.md"), "utf8")).toBe("中文资产\n");
+	expect(existsSync(join(root, "resources"))).toBe(false);
 	expect(existsSync(join(targetSkills, "search-skills"))).toBe(false);
 	expect(existsSync(join(targetSkills, "creative", "video", "node_modules"))).toBe(false);
 	expect(readFileSync(join(targetSkills, "search", "search", "SKILL.md"), "utf8")).toBe("keychain search\n");
-	expect(readFileSync(join(targetSkills, "operations", "workstation-setup", "SKILL.md"), "utf8")).toBe("distribution only\n");
 	expect(existsSync(join(targetSkills, "orphan"))).toBe(false);
 	expect(readFileSync(join(root, "packages", "pi-config", "SYSTEM.md"), "utf8")).toBe("public system\n");
 });
@@ -102,14 +98,12 @@ test("maintainer sync rejects plaintext credentials before replacing the snapsho
 	file(join(firecode, "AGENTS.md"), "source guide\n");
 	file(join(skills, "placeholder", "SKILL.md"), "public\n");
 	file(join(architecture, "skills", "architecture-wiki", "SKILL.md"), "中文资产\n");
-	file(join(architecture, "skills", "architecture-wiki-en", "SKILL.md"), "English asset\n");
 	file(system, "public system\n");
 	file(join(targetFirecode, "index.ts"), "previous snapshot\n");
 	file(join(targetFirecode, "config.example.jsonc"), "{}\n");
 	file(join(targetFirecode, "AGENTS.md"), "public guide\n");
 	file(join(targetFirecode, "tests", "loader.ts"), "portable loader\n");
 	file(join(targetSkills, "search", "search", "SKILL.md"), "keychain search\n");
-	file(join(targetSkills, "operations", "workstation-setup", "SKILL.md"), "distribution only\n");
 
 	await expect(syncSources({ root, firecode, skills, architecture, system, checkClean: false }))
 		.rejects.toThrow("明文凭据");
