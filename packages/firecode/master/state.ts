@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-const STATE_VERSION = 7;
+const STATE_VERSION = 8;
 
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type WorkerThinking = (typeof THINKING_LEVELS)[number];
@@ -11,6 +11,7 @@ export type WorkerDisposition = "pending" | "reminded";
 
 export interface WorkerRef {
 	name: string;
+	role: string;
 	model: string;
 	thinking: WorkerThinking;
 	status: WorkerStatus;
@@ -180,6 +181,7 @@ function isWorker(value: unknown): value is WorkerRef {
 	const record = value as Record<string, unknown>;
 	if (
 		typeof record.name !== "string" || !/^[a-z][a-z0-9_-]{0,31}$/u.test(record.name) ||
+		typeof record.role !== "string" || !record.role ||
 		typeof record.model !== "string" || !record.model ||
 		typeof record.thinking !== "string" || !THINKING_LEVELS.includes(record.thinking as WorkerThinking) ||
 		typeof record.status !== "string" || !isStatus(record.status) ||

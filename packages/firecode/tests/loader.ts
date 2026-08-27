@@ -71,7 +71,9 @@ export async function copyFirecodeSource(destination: string): Promise<void> {
 			const [root] = path.split(sep);
 			if (NON_RUNTIME_ROOTS.has(root)) return false;
 			if (![".md", ".mdx"].includes(extname(path))) return true;
-			return path.startsWith(`review${sep}prompts${sep}`) || path.startsWith(`watcher${sep}prompts${sep}`);
+			return path.startsWith(`master${sep}prompts${sep}`)
+				|| path.startsWith(`review${sep}prompts${sep}`)
+				|| path.startsWith(`watcher${sep}prompts${sep}`);
 		},
 	});
 }

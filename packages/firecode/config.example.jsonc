@@ -40,37 +40,38 @@
 		"context": "minimal"
 	},
 
-	// 新会话默认激活指挥官；模型必须是 provider/model。
+	// 新会话默认激活指挥官；每个模型原子必须是 provider/model/thinking。
 	"master": {
 		"autoActivate": true,
 		"workerExcludeExtensions": [],
-		"models": [
-			{
-				"model": "openai-codex/gpt-5.6-sol",
-				"thinking": "medium",
-				"use": "默认使用，常规实现/调试（速度快，偏 Debug 或纯执行，但容易过度工程过度测试）"
+		"roles": {
+			"调研员": {
+				"model": "openai-codex/gpt-5.6-luna/xhigh",
+				"use": "大规模并行调研，便宜，不承担实现"
 			},
-			{
-				"model": "openai-codex/gpt-5.6-luna",
-				"thinking": "xhigh",
-				"use": "大规模并行，便宜，适合调研任务，不适合实现"
+			"工程师": {
+				"model": "openai-codex/gpt-5.6-sol/medium",
+				"use": "常规实现与调试，速度快",
+				"fallback": ["anthropic/claude-opus-5/medium"]
 			},
-			{
-				"model": "anthropic/claude-opus-5",
-				"thinking": "medium",
-				"use": "常规实现/调试（速度中等，偏前端或综合）"
+			"全栈": {
+				"model": "anthropic/claude-opus-5/medium",
+				"use": "前后端综合实现与调试",
+				"fallback": ["openai-codex/gpt-5.6-sol/medium"]
 			},
-			{
-				"model": "anthropic/claude-fable-5",
-				"thinking": "high",
-				"use": "高级架构问题顾问，可原地执行，贵，用之前要和用户确认"
+			"架构师": {
+				"model": "anthropic/claude-fable-5/high",
+				"use": "高级架构顾问；费用高，启用前必须先征求用户确认"
 			},
-			{
-				"model": "kimi-coding/k3-256k",
-				"thinking": "high",
-				"use": "速度慢，纯视觉设计师，已有固定组件和设计方案时不适用"
+			"设计师": {
+				"model": "kimi-coding/k3-256k/high",
+				"use": "纯视觉设计；已有固定组件和设计方案时不适用"
+			},
+			"哨兵": {
+				"model": "openai-codex/gpt-5.6-luna/low",
+				"use": "盯守 CI、部署与长测试等等待过程"
 			}
-		]
+		}
 	},
 
 	"presets": {

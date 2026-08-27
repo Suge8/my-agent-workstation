@@ -65,6 +65,8 @@ pi install npm:pi-antigravity
 | 另一高性能 | 与主力不同家的强模型 | preset `alt+7` | grok-4.6 |
 | 每回合观察员 | 便宜、快 | watcher | gpt-5.6-sol |
 
+表里的角色名只描述档次，落点是 `defaultModel`、presets、review advisor 与 watcher。FireCode 指挥官的子代理角色是另一组概念——名字固定为调研员、工程师、全栈、架构师、设计师、哨兵，在步骤 5 的 `master.roles` 里单独绑定，可以复用这里选出的同一批模型。
+
 **观察员会产生额外开销**：watcher 在每个主会话回合结束后额外调用一次模型。把这句话原样转达读者，读者接受后再启用。
 
 **完成标准**：你手上有一张表，八个角色各自对应一个来自 `pi --list-models` 的 `provider/model` 字符串。
@@ -86,11 +88,11 @@ cp <repo>/packages/firecode/config.example.jsonc ~/.pi/agent/extensions/firecode
 
 基底里 features 已全开、keys 与 `openai` 段直接可用，作者的立场是愿意用就用原样。三个 feature 有前置条件，读者未满足时置为 `false`：`claudeSub` 要求已登录 `anthropic`；`openaiNative` 要求已登录 `openai-codex` 或 `xai`；`bark` 基底里就是 `false`，步骤 10 配了 Bark 地址后才改为 `true`。
 
-**陷阱：模型字段有两种写法。** `presets` 里 provider 与 model 是分开的两个字段；`review`、`master`、`watcher` 里是合并成一个 `"provider/model"` 字符串。写混了 FireCode 认不出模型。
+**陷阱：模型字段有三种写法。** `presets` 把 provider、model 和 thinking 档拆成 `provider`、`model`、`thinkingLevel` 三个独立字段；`review` 与 `watcher` 用两段式 `"provider/model"` 字符串，thinking 档在同级的 `thinking` 字段里；`master.roles` 用三段式 `"provider/model/thinking"` 字符串，thinking 档并在字符串结尾、没有独立字段。写混了 FireCode 认不出模型。
 
-**陷阱：`master` 是对象，不是数组。** 它的 `models` 数组每条含模型、thinking 档和用途描述；用途描述是指挥官选模型的依据，照基底写法给出强项与代价。
+**陷阱：`master.roles` 是角色名到模型的映射。** 六个角色名是固定集合，照基底原样保留、只换每个值里的模型。每个值含三段式 `model` 与一句 `use`——`use` 是指挥官选角色的依据，照基底写法给出强项与代价；可选的 `fallback` 是至多两条备选模型的数组，写法与 `model` 相同。
 
-替换范围就这些：`presets` 按步骤 4 的表绑定 `alt+1` 到 `alt+7`，别名自取、thinking 档沿用基底；`watcher` 与 `master` 换成步骤 4 选定的模型；`review` 只改 advisor 与 reviewers，其余字段沿用基底值。
+替换范围就这些：`presets` 按步骤 4 的表绑定 `alt+1` 到 `alt+7`，别名自取、thinking 档沿用基底；`watcher` 换成步骤 4 的观察员模型；`master.roles` 六个角色逐个换成读者已登录的模型，含各自的 `fallback`；`review` 只改 advisor 与 reviewers，其余字段沿用基底值。
 
 **完成标准**：下面这条命令裸退出码为 0（`config.jsonc` 去掉注释后按 JSON 校验）——
 

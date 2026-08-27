@@ -12,8 +12,10 @@ import {
 } from "./loader.ts";
 
 const { fauxAssistantMessage, fauxToolCall, registerFauxProvider } = await import(PI_AI_COMPAT_URL) as any;
-const TEST_MODEL = { model: "test/worker", thinking: "medium", use: "测试" };
-const TEST_MODEL_2 = { model: "test/worker-2", thinking: "high", use: "切换测试" };
+const TEST_ROLES = {
+	工程师: { model: "test/worker/medium", use: "测试" },
+	架构师: { model: "test/worker-2/high", use: "切换测试" },
+};
 const savedAgentDir = process.env.PI_CODING_AGENT_DIR;
 
 let faux: any;
@@ -43,13 +45,13 @@ test("autoActivate false 的新会话不注入，仍可手动启动", async () =
 	expect((await harness.list().then((result) => result.details as any)).workers).toEqual([]);
 });
 
-test("status 每个子代理一行显示中文状态与模型短名", async () => {
+test("status 每个子代理一行以角色为主、模型短名次之", async () => {
 	const { statusText } = await loadFirecodeModule("master/index.js") as any;
 
 	expect(statusText([
-		{ name: "侦察", status: "working", model: "openai-codex/gpt-5.1-codex-mini" },
-		{ name: "验收", status: "reviewing", model: "anthropic/claude-sonnet-4-5" },
-	])).toBe("侦察 工作 gpt-5.1-codex-mini\n验收 审查 claude-sonnet-4-5");
+		{ name: "侦察", role: "调研员", status: "working", model: "openai-codex/gpt-5.1-codex-mini" },
+		{ name: "验收", role: "工程师", status: "reviewing", model: "anthropic/claude-sonnet-4-5" },
+	])).toBe("侦察 调研员·工作 gpt-5.1-codex-mini\n验收 工程师·审查 claude-sonnet-4-5");
 });
 
 test("裸 /fire-master 来回翻转当前会话，status 保留并拒绝旧参数", async () => {
@@ -65,24 +67,58 @@ test("裸 /fire-master 来回翻转当前会话，status 保留并拒绝旧参�
 	expect(harness.notices.at(-1)).toContain("只接受 status");
 });
 
-test("自定义系统提示仍注入选型表与调度纪律", async () => {
+test("Master Markdown 与动态角色表按单一接缝注入", async () => {
 	const harness = await setup();
-	const systemPrompt = await harness.systemPrompt("自定义系统提示");
-	expect(systemPrompt.startsWith("自定义系统提示\n\n")).toBe(true);
-	expect(systemPrompt).toContain("选型表：test/worker（测试，thinking medium）");
-	expect(systemPrompt).toContain("哨兵纪律");
-	expect(systemPrompt).toContain("动手边界");
-	expect(systemPrompt).toContain("调查/哨兵票收割要点后立即 kill");
-	expect(systemPrompt).toContain("实现票保留待收口");
-	expect(systemPrompt).toContain("计划产物存在时，其维护责任随指挥权归指挥官");
-	expect(systemPrompt).toContain("子代理结果、中断与审查终态都会自动送达你的回合，无需也不要用 list/tail 轮询进度；tail 只用于按需读取执行细节");
-	expect(systemPrompt).toContain("审查纪律：默认省略 review；仅高影响或难以窄测证明的重要实现设 review:true，典型边界是安全权限、持久化/迁移、并发/状态机、公共/跨进程接口、构建发布");
-	expect(systemPrompt).toContain("调查、文档、机械修改、局部低风险修复、纯重构、纯追问均为轻量");
-	expect(systemPrompt).toContain("review:true 只记录持久义务，不自动开审；义务在 send/中断/失败后保留并阻止 ack，完成且验证通过后显式 review，审查通过或质量裁决停止后消除义务");
-	expect(systemPrompt).toContain("未挂义务的 idle Worker 仍可补审；拿不准先省略");
-	expect(systemPrompt).toContain('调用样板：start {"worker":"fix-auth"');
+	const prompt = await loadFirecodeModule("master/prompt.js") as any;
+	const expected = prompt.assembleMasterPrompt(
+		prompt.readMasterPrompt("master"),
+		"工程师：test/worker/medium（测试）；架构师：test/worker-2/high（切换测试）",
+	);
+	expect(expected).toContain("角色表：工程师：test/worker/medium（测试）");
+	expect(expected).toContain("投递：Worker 结果、中断与审查终态会自动送达；tail 仅用于按需读取执行细节。");
+	expect(expected).toContain("何时审查：复杂且影响大的实现，以及无法靠窄测可靠验收的任务，需要对抗性审查，在 start 时传 review:true；其余任务省略。");
+	expect(expected).toContain("如何启动：review:true 只是在任务开始时标记“这个任务完成后需要审查”，不会自动启动审查。这个标记不会因 send、reload、中断或失败而丢失，审查结束前不能 ack。Worker 返回结果并完成验证后，指挥官主动执行 review，才会开始对抗性审查。任务开始时没有标记 review:true，也可以在 Worker 空闲后主动执行 review；如果整个任务已经放弃，直接 kill。");
+	expect(expected).toContain("审查过程：review 会在原 Worker 会话中启动。独立模型读取 Worker 的工作记录，核对相关文件和验证结果。发现问题时，审查意见会交回同一个 Worker 核实和修复，然后再次审查；审查通过、顾问决定停止或达到最大轮数后结束。审查通过时仍可能附带不阻塞交付的建议，由指挥官判断是否需要继续处理。");
+	expect(await harness.systemPrompt("自定义系统提示")).toBe(`自定义系统提示\n\n${expected}`);
 	await harness.command("");
 	expect(await harness.systemPrompt("自定义系统提示")).toBe("自定义系统提示");
+});
+
+test("Worker Markdown 只组装动态名字与协议信封", async () => {
+	const harness = await setup();
+	const prompt = await loadFirecodeModule("master/prompt.js") as any;
+	let systemPrompt = "";
+	faux.setResponses([(context: any) => {
+		systemPrompt = context.systemPrompt ?? "";
+		return fauxAssistantMessage("完成");
+	}]);
+	const settled = new Promise<void>((resolve) => { harness.onMessage = () => resolve(); });
+	await harness.execute({
+		action: "start", worker: "prompt-contract", prompt: "执行", role: "工程师",
+	});
+	await settled;
+	expect(systemPrompt).toContain(prompt.assembleWorkerPrompt(
+		"你是指挥官委派的 Worker，只在当前 checkout 内完成工作说明。验证改动并报告结果、证据与遗留风险；无法完成或验证时如实报告阻塞原因和现场，不得假成功。Git 操作限于本地且仅覆盖自己修改的路径。",
+		"prompt-contract",
+	));
+});
+
+test("Master prompt 缺失或为空时只关闭 Master 并明确失败", async () => {
+	const missing = await loadFirecodeModule("master/prompt.js") as any;
+	expect(() => missing.readMasterPrompt("missing")).toThrow("Master missing prompt 读取失败");
+
+	for (const kind of ["master", "worker"]) {
+		const empty = await loadFirecodeModule("master/prompt.js", {
+			extraFiles: { [`master/prompts/${kind}.zh.md`]: " \n" },
+		}) as any;
+		expect(() => empty.readMasterPrompt(kind)).toThrow(`Master ${kind} prompt 为空`);
+	}
+
+	const harness = await setup(true, {
+		promptFiles: { "master/prompts/master.zh.md": " \n" },
+	});
+	expect(harness.notices.at(-1)).toContain("Master master prompt 为空");
+	await expect(harness.list()).rejects.toThrow("只在 Master 中可用");
 });
 
 test("真 SDK 在执行前拒绝缺 worker 与旧 list 动作", async () => {
@@ -107,7 +143,7 @@ test("真 SDK 在执行前拒绝缺 worker 与旧 list 动作", async () => {
 	});
 	faux.setResponses([
 		fauxAssistantMessage(fauxToolCall("subagents", {
-			action: "start", prompt: "执行", model: "test/worker", thinking: "medium",
+			action: "start", prompt: "执行", role: "工程师",
 		}), { stopReason: "toolUse" }),
 		fauxAssistantMessage("已拒绝"),
 	]);
@@ -129,25 +165,43 @@ test("真 SDK 在执行前拒绝缺 worker 与旧 list 动作", async () => {
 	session.dispose();
 });
 
-test("模型选择拒绝错误回带完整选型表", async () => {
-	const harness = await setup();
-	const roster = "test/worker（测试，thinking medium）；test/worker-2（切换测试，thinking high）";
+test("角色表、原子与 fallback 配置错误时拒绝启动", async () => {
+	const harness = await setup(true, {
+		roles: {
+			工程师: {
+				model: "invalid/high",
+				thinking: "medium",
+				use: "旧写法",
+				fallback: ["test/a/low", "test/b/low", "test/c/low"],
+			} as any,
+		},
+	});
+	expect(harness.notices.join("\n")).toContain("Master 配置有问题，已停止");
+	expect(harness.notices.join("\n")).toContain("未知字段 master.roles.工程师.thinking");
+	expect(harness.notices.join("\n")).toContain("master.roles.工程师.model 模型无效");
+	expect(harness.notices.join("\n")).toContain("master.roles.工程师.fallback 必须是至多 2 项的数组");
+	await expect(harness.list()).rejects.toThrow("只在 Master 中可用");
+});
+
+test("角色表提示词只注入已配置角色，缺失角色拒绝派发并列出已配置项", async () => {
+	const harness = await setup(true, { roles: { 工程师: TEST_ROLES.工程师 } });
+	const prompt = await harness.systemPrompt("主提示词");
+	expect(prompt).toContain("角色表：工程师：test/worker/medium（测试）");
+	expect(prompt).not.toContain("架构师：");
 	await expect(harness.execute({
-		action: "start", worker: "missing-model", prompt: "执行", thinking: "medium",
-	})).rejects.toThrow(roster);
+		action: "start", worker: "missing-role", prompt: "执行",
+	})).rejects.toThrow("start 必须指定 role");
 	await expect(harness.execute({
-		action: "start", worker: "outside-roster", prompt: "执行", model: "test/unknown", thinking: "medium",
-	})).rejects.toThrow(roster);
+		action: "start", worker: "outside-roster", prompt: "执行", role: "架构师",
+	})).rejects.toThrow("角色未配置：架构师。已配置角色：工程师");
 
 	faux.setResponses([fauxAssistantMessage("完成")]);
 	const settled = new Promise<void>((resolve) => { harness.onMessage = () => resolve(); });
-	await harness.execute({
-		action: "start", worker: "switch-model", prompt: "执行", model: "test/worker", thinking: "medium",
-	});
+	await harness.execute({ action: "start", worker: "switch-role", prompt: "执行", role: "工程师" });
 	await settled;
 	await expect(harness.execute({
-		action: "send", worker: "switch-model", prompt: "继续", model: "test/unknown",
-	})).rejects.toThrow(roster);
+		action: "send", worker: "switch-role", prompt: "继续", role: "架构师",
+	})).rejects.toThrow("角色未配置：架构师。已配置角色：工程师");
 });
 
 test("subagents 是 worker 必填的七命令，池快照是独立零参查询", async () => {
@@ -160,11 +214,16 @@ test("subagents 是 worker 必填的七命令，池快照是独立零参查询",
 		?? harness.commandTool.parameters.properties.action.enum).not.toContain("list");
 	expect(harness.parameterDescriptions.worker).toBe("start 起简短任务名；其余动作填目标 Worker。");
 	expect(harness.parameterDescriptions.worker).not.toContain("必填");
-	for (const name of ["action", "worker", "prompt", "model", "thinking", "cwd", "review"])
+	for (const name of ["action", "worker", "prompt", "role", "thinking", "cwd", "review"])
 		expect(harness.parameterDescriptions[name]).not.toBeEmpty();
-	expect(harness.parameterDescriptions.model).toContain("start 必填");
-	expect(harness.parameterDescriptions.model).toContain("send");
-	expect(harness.parameterDescriptions.model).toContain("切换");
+	expect(harness.commandTool.parameters.properties).not.toHaveProperty("model");
+	expect(harness.parameterDescriptions.role).toContain("start 必填");
+	expect(harness.parameterDescriptions.role).toContain("send");
+	expect(harness.parameterDescriptions.role).toContain("切换");
+	expect(harness.commandTool.parameters.properties.role.anyOf?.map((item: any) => item.const)
+		?? harness.commandTool.parameters.properties.role.enum).toEqual([
+		"调研员", "工程师", "全栈", "架构师", "设计师", "哨兵",
+	]);
 	expect(harness.parameterDescriptions.review).toContain("审查纪律");
 	expect(harness.parameterDescriptions.review).toContain("true 不自动开审");
 	expect(harness.listTool.description).toBe("查看子代理池快照");
@@ -187,7 +246,7 @@ test("list 展开投影 working 的当前工具，但模型正文不含动作", 
 		fauxAssistantMessage("完成"),
 	]);
 	const started = await harness.execute({
-		action: "start", worker: "observed", prompt: "读取约束", model: "test/worker", thinking: "medium",
+		action: "start", worker: "observed", prompt: "读取约束", role: "工程师",
 	});
 	const session = harness.pool.getSession((started.details as any).worker.session);
 	const toolStarted = new Promise<void>((resolve) => session.subscribe(async (event: any) => {
@@ -210,11 +269,11 @@ test("list 展开投影 working 的当前工具，但模型正文不含动作", 
 	expect(workingAction.startedAt <= toolEventAfter).toBe(true);
 	const collapsed = harness.renderListLine(listed);
 	expect(collapsed).toHaveLength(1);
-	expect(collapsed[0]).toContain("池 1");
+	expect(collapsed[0]).toContain("池 1：observed 工程师·工作");
 	(listed.details as any).workers[0].currentAction.startedAt = Date.now() - 300;
 	const expanded = harness.renderResult(listed, true).join("\n");
 	expect(expanded).toContain("observed");
-	expect(expanded).toMatch(/read · 已 0\.[34]s/u);
+	expect(expanded).toMatch(/工程师·工作 · read · 已 0\.[34]s/u);
 
 	const delivered = new Promise<void>((resolve) => { harness.onMessage = () => resolve(); });
 	const settledBefore = Date.now();
@@ -243,11 +302,11 @@ test("主回合忙碌时，subagents 以队列语义完成 start→事件落定�
 		action: "start",
 		worker: "trace",
 		prompt: "只回复完成",
-		model: "test/worker",
-		thinking: "medium",
+		role: "工程师",
+		thinking: "low",
 	});
 	const worker = (started.details as any).worker;
-	expect(worker.status).toBe("working");
+	expect(worker).toMatchObject({ status: "working", role: "工程师", model: "test/worker", thinking: "low" });
 	await settled;
 	await Bun.sleep(0);
 
@@ -274,16 +333,122 @@ test("主回合忙碌时，subagents 以队列语义完成 start→事件落定�
 	expect(existsSync(sessionPath)).toBe(true);
 });
 
-test("失败落定事件使用统一分节格式并生成紧凑正文预览", async () => {
+test("供应商故障在无 fallback 时明确报告链已用尽", async () => {
 	const harness = await setup();
 	faux.setResponses([async () => { throw new Error("quota exhausted"); }]);
 	const delivered = new Promise<void>((resolve) => { harness.onMessage = () => resolve(); });
 	await harness.execute({
-		action: "start", worker: "failed", prompt: "执行", model: "test/worker", thinking: "medium",
+		action: "start", worker: "failed", prompt: "执行", role: "工程师",
 	});
 	await delivered;
-	expect(harness.messages[0].message.content).toBe("<firecode_master_event>\n子代理 failed 已停下\n错误：\nquota exhausted\n</firecode_master_event>");
+	expect(harness.messages[0].message.content).toBe("<firecode_master_event>\n子代理 failed 已停下\n错误：\nquota exhausted\n角色 工程师 的 fallback 链已用尽\n</firecode_master_event>");
 	expect(harness.messages[0].message.details.titles).toEqual(["子代理 failed 已停下 — quota exhausted"]);
+});
+
+test("429 瞬时限流终态不触发 fallback，按原模型正常报错落定", async () => {
+	const harness = await setup(true, {
+		roles: {
+			...TEST_ROLES,
+			工程师: { ...TEST_ROLES.工程师, fallback: ["test/worker-2/high"] },
+		},
+	});
+	faux.setResponses([fauxAssistantMessage("已启动")]);
+	let delivered = new Promise<void>((resolve) => { harness.onMessage = () => resolve(); });
+	const started = await harness.execute({
+		action: "start", worker: "rate-limited", prompt: "初始化", role: "工程师",
+	});
+	await delivered;
+
+	const session = harness.pool.getSession((started.details as any).worker.session);
+	session.settingsManager.applyOverrides({ retry: { enabled: true, maxRetries: 1, baseDelayMs: 1 } });
+	const rateLimit = fauxAssistantMessage("", { stopReason: "error", errorMessage: "429 rate limit exceeded" });
+	faux.setResponses([rateLimit, rateLimit]);
+	delivered = new Promise<void>((resolve) => { harness.onMessage = () => resolve(); });
+	await harness.execute({ action: "send", worker: "rate-limited", prompt: "继续" });
+	await delivered;
+
+	const content = harness.messages.at(-1).message.content;
+	expect(content).toContain("错误：\n429 rate limit exceeded");
+	expect(content).not.toContain("已切换");
+	const worker = (await harness.list().then((result) => result.details as any)).workers[0];
+	expect(worker).toMatchObject({
+		status: "idle", role: "工程师", model: "test/worker", thinking: "medium",
+	});
+});
+
+test("供应商故障按角色 fallback 在同一会话续跑并更新实际模型", async () => {
+	const harness = await setup(true, {
+		roles: {
+			...TEST_ROLES,
+			工程师: { ...TEST_ROLES.工程师, fallback: ["test/worker-2/high"] },
+		},
+	});
+	faux.setResponses([
+		fauxAssistantMessage("", { stopReason: "error", errorMessage: "insufficient_quota" }),
+		fauxAssistantMessage("降级后完成"),
+	]);
+	const delivered = new Promise<void>((resolve) => { harness.onMessage = () => resolve(); });
+	const started = await harness.execute({
+		action: "start", worker: "fallback", prompt: "执行", role: "工程师",
+	});
+	await delivered;
+
+	expect(harness.messages[0].message.content).toContain("已切换 test/worker/medium→test/worker-2/high（额度或计费耗尽）");
+	expect(harness.messages[0].message.content).toContain("同一会话自动续跑");
+	expect(harness.messages[0].message.content).toContain("回复：\n降级后完成");
+	const worker = (await harness.list().then((result) => result.details as any)).workers[0];
+	expect(worker).toMatchObject({
+		role: "工程师", model: "test/worker-2", thinking: "high", session: (started.details as any).worker.session,
+	});
+});
+
+test("溢出恢复删除运行时消息后仍落定供应商错误而非过期回复", async () => {
+	const harness = await setup();
+	faux.setResponses([fauxAssistantMessage("上一回合回复")]);
+	let delivered = new Promise<void>((resolve) => { harness.onMessage = () => resolve(); });
+	const started = await harness.execute({
+		action: "start", worker: "overflow", prompt: "初始化", role: "工程师",
+	});
+	await delivered;
+
+	let release!: () => void;
+	const gate = new Promise<void>((resolve) => { release = resolve; });
+	const providerError = "maximum context length is 128 tokens";
+	faux.setResponses([async () => {
+		await gate;
+		return fauxAssistantMessage("", { stopReason: "error", errorMessage: providerError });
+	}]);
+	const session = harness.pool.getSession((started.details as any).worker.session);
+	const deleted = new Promise<void>((resolve) => session.subscribe((event: any) => {
+		if (event.type !== "agent_end") return;
+		session.messages.splice(-1, 1);
+		resolve();
+	}));
+	delivered = new Promise<void>((resolve) => { harness.onMessage = () => resolve(); });
+	await harness.execute({ action: "send", worker: "overflow", prompt: "继续" });
+	release();
+	await deleted;
+	await delivered;
+
+	const content = harness.messages.at(-1).message.content;
+	expect(content).toContain(`错误：\n${providerError}`);
+	expect(content).not.toContain("上一回合回复");
+	expect(content).not.toContain("（无回复）");
+});
+
+test("非显式中断的 aborted 终态落定明确原因", async () => {
+	const harness = await setup();
+	faux.setResponses([
+		fauxAssistantMessage("", { stopReason: "aborted", errorMessage: "upstream connection closed" }),
+	]);
+	const delivered = new Promise<void>((resolve) => { harness.onMessage = () => resolve(); });
+	await harness.execute({
+		action: "start", worker: "aborted", prompt: "执行", role: "工程师",
+	});
+	await delivered;
+
+	expect(harness.messages[0].message.content).toContain("错误：\n回合意外中止：upstream connection closed");
+	expect(harness.messages[0].message.content).not.toContain("（无回复）");
 });
 
 test("进程内池拒绝同一 sessionPath 的第二个持有者，恢复缺失文件明确失败", async () => {
@@ -314,7 +479,7 @@ test("空闲会话自动释放后 kill 仍只删档案并保留会话文件", as
 	faux.setResponses([fauxAssistantMessage("完成")]);
 	const settled = new Promise<void>((resolve) => { harness.onMessage = () => resolve(); });
 	const started = await harness.execute({
-		action: "start", worker: "cold-kill", prompt: "完成", model: "test/worker", thinking: "medium",
+		action: "start", worker: "cold-kill", prompt: "完成", role: "工程师",
 	});
 	await settled;
 	const sessionPath = (started.details as any).worker.session;
@@ -322,6 +487,52 @@ test("空闲会话自动释放后 kill 仍只删档案并保留会话文件", as
 	expect(harness.pool.has(sessionPath)).toBe(false);
 	await harness.execute({ action: "kill", worker: "cold-kill" });
 	expect(existsSync(sessionPath)).toBe(true);
+});
+
+test("空闲前门投递未完成时替换会话，旧投递不得确认到新 runtime", async () => {
+	const harness = await setup(true, { deferUserMessage: true });
+	harness.idle = true;
+	faux.setResponses([fauxAssistantMessage("旧会话结果")]);
+	await harness.execute({
+		action: "start", worker: "old-delivery", prompt: "执行", role: "工程师",
+	});
+	await harness.userMessageStarted;
+	const appendedBeforeReplacement = harness.appended.length;
+
+	await harness.replaceSession();
+	harness.releaseUserMessage();
+	await Bun.sleep(0);
+
+	expect(harness.appended).toHaveLength(appendedBeforeReplacement);
+	expect(harness.appended.map(([type]) => type)).toEqual(["firecode-master-pending-event"]);
+	expect((await harness.list().then((result) => result.details as any)).workers).toEqual([]);
+});
+
+test("审查结算中替换会话，旧 continuation 不得写入新 runtime", async () => {
+	const harness = await setup(true, { review: true, mockReview: true });
+	faux.setResponses([fauxAssistantMessage("实现完成")]);
+	let delivered = new Promise<void>((resolve) => { harness.onMessage = () => resolve(); });
+	const started = await harness.execute({
+		action: "start", worker: "old-review", prompt: "实现", role: "工程师", review: true,
+	});
+	await delivered;
+
+	const session = harness.pool.getSession((started.details as any).worker.session);
+	let releaseReview!: () => void;
+	const reviewGate = new Promise<void>((resolve) => { releaseReview = resolve; });
+	const prompt = session.prompt.bind(session);
+	session.prompt = (text: string) => text === "/fire-review" ? reviewGate : prompt(text);
+	await harness.execute({ action: "review", worker: "old-review" });
+	await harness.replaceSession();
+	const appendedBeforeSettlement = harness.appended.length;
+	const noticesBeforeSettlement = harness.notices.length;
+
+	releaseReview();
+	await Bun.sleep(0);
+
+	expect(harness.appended).toHaveLength(appendedBeforeSettlement);
+	expect(harness.notices).toHaveLength(noticesBeforeSettlement);
+	expect((await harness.list().then((result) => result.details as any)).workers).toEqual([]);
 });
 
 test("主回合空闲时，并发落定合并走前门用户消息，投递前写 pending、成功后写 ack", async () => {
@@ -334,8 +545,8 @@ test("主回合空闲时，并发落定合并走前门用户消息，投递前�
 		async () => { await gate; return fauxAssistantMessage("结果 B"); },
 	]);
 	await Promise.all([
-		harness.execute({ action: "start", worker: "merge-a", prompt: "A", model: "test/worker", thinking: "medium" }),
-		harness.execute({ action: "start", worker: "merge-b", prompt: "B", model: "test/worker", thinking: "medium" }),
+		harness.execute({ action: "start", worker: "merge-a", prompt: "A", role: "工程师" }),
+		harness.execute({ action: "start", worker: "merge-b", prompt: "B", role: "工程师" }),
 	]);
 	const delivered = new Promise<void>((resolve) => { harness.onMessage = () => resolve(); });
 	release();
@@ -362,7 +573,7 @@ test("在飞 send 拒绝；interrupt 落中断标记、定时提醒，首次 sen
 		},
 	]);
 	await harness.execute({
-		action: "start", worker: "interrupted", prompt: "开始", model: "test/worker", thinking: "medium",
+		action: "start", worker: "interrupted", prompt: "开始", role: "工程师",
 	});
 	await expect(harness.execute({ action: "send", worker: "interrupted", prompt: "急件" }))
 		.rejects.toThrow("急件先 interrupt 再 send");
@@ -401,7 +612,7 @@ test("失败的 interrupt 不会把本回合或下一回合误记为中断", asy
 		return fauxAssistantMessage("自然完成");
 	}]);
 	const started = await harness.execute({
-		action: "start", worker: "abort-race", prompt: "执行", model: "test/worker", thinking: "medium",
+		action: "start", worker: "abort-race", prompt: "执行", role: "工程师",
 	});
 	const session = harness.pool.getSession((started.details as any).worker.session);
 	session.abort = async () => { throw new Error("abort failed"); };
@@ -421,7 +632,7 @@ test("同一空闲 Worker 的并发 send 只接收一票，另一票按在飞拒
 	faux.setResponses([fauxAssistantMessage("初始完成")]);
 	let delivered = new Promise<void>((resolve) => { harness.onMessage = () => resolve(); });
 	await harness.execute({
-		action: "start", worker: "single-flight", prompt: "初始化", model: "test/worker", thinking: "medium",
+		action: "start", worker: "single-flight", prompt: "初始化", role: "工程师",
 	});
 	await delivered;
 
@@ -451,18 +662,18 @@ test("kill 赢过正在准备的 send/review，异步写回不会复活已删档
 	faux.setResponses([fauxAssistantMessage("初始完成"), fauxAssistantMessage("待审完成")]);
 	let delivered = new Promise<void>((resolve) => { harness.onMessage = () => resolve(); });
 	await harness.execute({
-		action: "start", worker: "kill-send", prompt: "初始化", model: "test/worker", thinking: "medium",
+		action: "start", worker: "kill-send", prompt: "初始化", role: "工程师",
 	});
 	await delivered;
 	delivered = new Promise<void>((resolve) => { harness.onMessage = () => resolve(); });
 	await harness.execute({
-		action: "start", worker: "kill-review", prompt: "初始化", model: "test/worker", thinking: "medium", review: true,
+		action: "start", worker: "kill-review", prompt: "初始化", role: "工程师", review: true,
 	});
 	await delivered;
 
 	faux.setResponses([fauxAssistantMessage("不应执行")]);
 	const sending = harness.execute({
-		action: "send", worker: "kill-send", prompt: "新任务", model: "test/worker-2",
+		action: "send", worker: "kill-send", prompt: "新任务", role: "架构师",
 	});
 	await harness.execute({ action: "kill", worker: "kill-send" });
 	await expect(sending).rejects.toThrow("已被 kill");
@@ -482,7 +693,7 @@ test("第 16 个在飞 Worker 被 admission 拒绝并回报当前清单", async 
 		return fauxAssistantMessage(`完成 ${index}`);
 	}));
 	const starts = await Promise.allSettled(Array.from({ length: 16 }, (_, index) => harness.execute({
-		action: "start", worker: `slot-${index}`, prompt: "等待", model: "test/worker", thinking: "medium",
+		action: "start", worker: `slot-${index}`, prompt: "等待", role: "工程师",
 	})));
 	const rejected = starts.filter((result) => result.status === "rejected") as PromiseRejectedResult[];
 	expect(rejected).toHaveLength(1);
@@ -495,12 +706,12 @@ test("第 16 个在飞 Worker 被 admission 拒绝并回报当前清单", async 
 test("fire-review 不可用时拒绝 start/send 挂审查义务", async () => {
 	const harness = await setup();
 	await expect(harness.execute({
-		action: "start", worker: "blocked-review", prompt: "实现", model: "test/worker", thinking: "medium", review: true,
+		action: "start", worker: "blocked-review", prompt: "实现", role: "工程师", review: true,
 	})).rejects.toThrow("fire-review 已关闭");
 	faux.setResponses([fauxAssistantMessage("完成")]);
 	const delivered = new Promise<void>((resolve) => { harness.onMessage = () => resolve(); });
 	await harness.execute({
-		action: "start", worker: "plain", prompt: "实现", model: "test/worker", thinking: "medium",
+		action: "start", worker: "plain", prompt: "实现", role: "工程师",
 	});
 	await delivered;
 	await expect(harness.execute({ action: "send", worker: "plain", prompt: "加审查义务", review: true }))
@@ -512,7 +723,7 @@ test("list 展开投影 reviewing 的轮次与审查者进度", async () => {
 	faux.setResponses([fauxAssistantMessage("实现完成")]);
 	const delivered = new Promise<void>((resolve) => { harness.onMessage = () => resolve(); });
 	await harness.execute({
-		action: "start", worker: "under-review", prompt: "实现", model: "test/worker", thinking: "medium", review: true,
+		action: "start", worker: "under-review", prompt: "实现", role: "工程师", review: true,
 	});
 	await delivered;
 	await harness.execute({ action: "review", worker: "under-review" });
@@ -532,7 +743,7 @@ test("审查义务只能经显式 review 履行，未履行拒绝 ack，kill 随
 	faux.setResponses([fauxAssistantMessage("实现完成"), fauxAssistantMessage("待删除")]);
 	let delivered = new Promise<void>((resolve) => { harness.onMessage = () => resolve(); });
 	await harness.execute({
-		action: "start", worker: "obligation", prompt: "实现", model: "test/worker", thinking: "medium", review: true,
+		action: "start", worker: "obligation", prompt: "实现", role: "工程师", review: true,
 	});
 	await delivered;
 	expect(harness.messages).toHaveLength(1);
@@ -548,7 +759,7 @@ test("审查义务只能经显式 review 履行，未履行拒绝 ack，kill 随
 
 	delivered = new Promise<void>((resolve) => { harness.onMessage = () => resolve(); });
 	await harness.execute({
-		action: "start", worker: "discard-obligation", prompt: "实现", model: "test/worker", thinking: "medium", review: true,
+		action: "start", worker: "discard-obligation", prompt: "实现", role: "工程师", review: true,
 	});
 	await delivered;
 	await harness.execute({ action: "kill", worker: "discard-obligation" });
@@ -561,7 +772,7 @@ test("review 命令未启动时明确失败结算并保留审查义务", async (
 	faux.setResponses([fauxAssistantMessage("实现完成"), fauxAssistantMessage("未启动审查")]);
 	let delivered = new Promise<void>((resolve) => { harness.onMessage = () => resolve(); });
 	await harness.execute({
-		action: "start", worker: "review-missing", prompt: "实现", model: "test/worker", thinking: "medium", review: true,
+		action: "start", worker: "review-missing", prompt: "实现", role: "工程师", review: true,
 	});
 	await delivered;
 
@@ -593,7 +804,31 @@ test("crash 恢复只重投 pending 减 ack 的差集", async () => {
 	expect(harness.appended).toEqual([["firecode-master-event-ack", { ids: ["e1"] }]]);
 });
 
-test("send 对冷 Worker 透明复活、省略模型沿用、显式模型与 thinking 原地切换并入会话记录", async () => {
+test("send 只覆盖 thinking 时沿用当前角色与模型", async () => {
+	const harness = await setup();
+	faux.setResponses([fauxAssistantMessage("第一轮"), fauxAssistantMessage("升档完成")]);
+	let delivered = new Promise<void>((resolve) => { harness.onMessage = () => resolve(); });
+	const started = await harness.execute({
+		action: "start", worker: "thinking-only", prompt: "初始化", role: "工程师",
+	});
+	await delivered;
+
+	delivered = new Promise<void>((resolve) => { harness.onMessage = () => resolve(); });
+	await harness.execute({
+		action: "send", worker: "thinking-only", prompt: "继续", thinking: "high",
+	});
+	await delivered;
+
+	const worker = (await harness.list().then((result) => result.details as any)).workers[0];
+	expect(worker).toMatchObject({
+		status: "idle", role: "工程师", model: "test/worker", thinking: "high",
+		session: (started.details as any).worker.session,
+	});
+	const sessionText = await Bun.file(worker.session).text();
+	expect(sessionText.match(/"type":"model_change"/gu)).toHaveLength(1);
+});
+
+test("send 对冷 Worker 透明复活、省略角色沿用、显式角色原地切换并入会话记录", async () => {
 	const harness = await setup(true, { idleTimeoutMs: 10 });
 	faux.setResponses([
 		fauxAssistantMessage("第一轮"),
@@ -602,7 +837,7 @@ test("send 对冷 Worker 透明复活、省略模型沿用、显式模型与 thi
 	]);
 	let delivered = new Promise<void>((resolve) => { harness.onMessage = () => resolve(); });
 	const started = await harness.execute({
-		action: "start", worker: "revive", prompt: "第一轮", model: "test/worker", thinking: "medium",
+		action: "start", worker: "revive", prompt: "第一轮", role: "工程师",
 	});
 	await delivered;
 	const sessionPath = (started.details as any).worker.session;
@@ -613,29 +848,29 @@ test("send 对冷 Worker 透明复活、省略模型沿用、显式模型与 thi
 	await harness.execute({ action: "send", worker: "revive", prompt: "沿用" });
 	await delivered;
 	let listed = (await harness.list().then((result) => result.details as any)).workers[0];
-	expect(listed).toMatchObject({ status: "idle", model: "test/worker", thinking: "medium" });
+	expect(listed).toMatchObject({ status: "idle", role: "工程师" });
 
 	delivered = new Promise<void>((resolve) => { harness.onMessage = () => resolve(); });
 	await harness.execute({
-		action: "send", worker: "revive", prompt: "切换", model: "test/worker-2", thinking: "high",
+		action: "send", worker: "revive", prompt: "切换", role: "架构师",
 	});
 	await delivered;
 	listed = (await harness.list().then((result) => result.details as any)).workers[0];
-	expect(listed).toMatchObject({ status: "idle", model: "test/worker-2", thinking: "high" });
+	expect(listed).toMatchObject({ status: "idle", role: "架构师" });
 	const sessionText = await Bun.file(sessionPath).text();
 	expect(sessionText).toContain('"type":"model_change"');
 	expect(sessionText).toContain('"type":"thinking_level_change"');
 });
 
-test("v6 状态由所有者丢弃并告知旧进程不纳入新池", async () => {
+test("v7 状态由所有者丢弃并告知旧进程不纳入新池", async () => {
 	const harness = await setup(false);
 	const state = await loadFirecodeModule("master/state.js") as any;
 	const path = state.masterStatePath(harness.sessionId);
 	await mkdir(dirname(path), { recursive: true });
-	await writeFile(path, JSON.stringify({ version: 6, workers: [] }));
+	await writeFile(path, JSON.stringify({ version: 7, workers: [] }));
 	try {
 		await harness.command("");
-		expect(harness.notices.join("\n")).toContain("旧版 v6 子代理池已丢弃");
+		expect(harness.notices.join("\n")).toContain("旧版 v7 子代理池已丢弃");
 		expect(harness.notices.join("\n")).toContain("旧运行时进程不会纳入新池");
 		expect(await readdir(dirname(path))).not.toContain(path.split("/").pop());
 	} finally {
@@ -652,7 +887,7 @@ test("显式 observer 角色不注册 Master 工具面", async () => {
 				bark: false, review: false, master: true, watcher: false,
 			},
 			review: TEST_REVIEW_CONFIG,
-			master: { models: [TEST_MODEL], workerExcludeExtensions: [], autoActivate: true },
+			master: { roles: { 工程师: TEST_ROLES.工程师 }, workerExcludeExtensions: [], autoActivate: true },
 		}),
 		extraFiles: {
 			"role-harness.ts": [
@@ -686,7 +921,7 @@ test("Worker 会话只注册 checkout 守卫，不暴露 Master 工具面", asyn
 		configJsonc: JSON.stringify({
 			features: { master: true, review: false },
 			review: TEST_REVIEW_CONFIG,
-			master: { models: [TEST_MODEL, TEST_MODEL_2] },
+			master: { roles: TEST_ROLES },
 		}),
 	}) as any;
 	const register = (worker = false) => {
@@ -729,6 +964,9 @@ async function setup(activate = true, options: {
 	mockReview?: boolean;
 	reviewProgressOnly?: boolean;
 	autoActivate?: boolean;
+	deferUserMessage?: boolean;
+	promptFiles?: Record<string, string>;
+	roles?: Record<string, { model: string; use: string; fallback?: string[] }>;
 } = {}) {
 	directory = await mkdtemp(join(tmpdir(), "firecode-master-sdk-"));
 	const cwd = join(directory, "project");
@@ -773,11 +1011,12 @@ async function setup(activate = true, options: {
 		...(options.idleTimeoutMs === undefined ? {} : { idleTimeoutMs: options.idleTimeoutMs }),
 	});
 	const module = await loadFirecodeModule("master/index.js", {
+		extraFiles: options.promptFiles,
 		configJsonc: JSON.stringify({
 			features: { master: true, review: options.review === true },
 			review: TEST_REVIEW_CONFIG,
 			master: {
-				models: [TEST_MODEL, TEST_MODEL_2],
+				roles: options.roles ?? TEST_ROLES,
 				workerExcludeExtensions: [],
 				...(options.autoActivate === undefined ? {} : { autoActivate: options.autoActivate }),
 			},
@@ -793,6 +1032,12 @@ async function setup(activate = true, options: {
 	const userMessages: string[] = [];
 	let onMessage: (() => void) | undefined;
 	let idle = false;
+	let releaseUserMessage = () => {};
+	const userMessageGate = options.deferUserMessage
+		? new Promise<void>((resolve) => { releaseUserMessage = resolve; })
+		: Promise.resolve();
+	let markUserMessageStarted!: () => void;
+	const userMessageStarted = new Promise<void>((resolve) => { markUserMessageStarted = resolve; });
 	let activeTools = ["read", "bash", "edit", "write"];
 	const pi = {
 		registerMessageRenderer() {},
@@ -807,9 +1052,14 @@ async function setup(activate = true, options: {
 			entries.push({ type: "custom", customType: type, data });
 		},
 		sendMessage: (message: any, options: any) => { messages.push({ message, options }); onMessage?.(); },
-		sendUserMessage: async (content: string) => { userMessages.push(content); onMessage?.(); },
+		sendUserMessage: async (content: string) => {
+			userMessages.push(content);
+			markUserMessageStarted();
+			await userMessageGate;
+			onMessage?.();
+		},
 	};
-	const sessionId = crypto.randomUUID();
+	let sessionId = crypto.randomUUID();
 	const main = SessionManager.create(cwd, sessionDir);
 	const ctx = {
 		cwd,
@@ -830,7 +1080,7 @@ async function setup(activate = true, options: {
 		},
 	};
 	module.registerMaster(pi, {
-		resolveModel: async (id: string) => id === TEST_MODEL_2.model ? alternateModel : fauxModel,
+		resolveModel: async (id: string) => id === "test/worker-2" ? alternateModel : fauxModel,
 		pool,
 		...(options.interruptResumeMs === undefined ? {} : { interruptResumeMs: options.interruptResumeMs }),
 	});
@@ -838,7 +1088,7 @@ async function setup(activate = true, options: {
 	if (activate) await command("");
 	return {
 		cwd,
-		sessionId,
+		get sessionId() { return sessionId; },
 		notices,
 		messages,
 		userMessages,
@@ -847,9 +1097,16 @@ async function setup(activate = true, options: {
 		pool,
 		set onMessage(value: (() => void) | undefined) { onMessage = value; },
 		set idle(value: boolean) { idle = value; },
+		userMessageStarted,
+		releaseUserMessage,
 		command,
 		emit: async (name: string, event: any) => {
 			for (const handler of handlers.get(name) ?? []) await handler(event, ctx);
+		},
+		replaceSession: async () => {
+			sessionId = crypto.randomUUID();
+			entries.length = 0;
+			for (const handler of handlers.get("session_start") ?? []) await handler({}, ctx);
 		},
 		agentDir,
 		model: fauxModel,

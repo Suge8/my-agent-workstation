@@ -6,6 +6,7 @@ import { buildBarkPayload, hasPendingDisposition } from "../session/bark.js";
 
 const worker = (disposition?: "pending" | "reminded") => ({
 	name: "w1",
+	role: "工程师",
 	model: "openai-codex/gpt-5.6-sol",
 	thinking: "medium",
 	status: "idle",
@@ -25,13 +26,13 @@ test("有待拍板事件时升 timeSensitive 并带副标题，否则 active 无
 	expect(urgent.id).toBe("sid");
 });
 
-test("v7 待发落 Worker 触发待拍板，空池、文件缺失与损坏均不触发", async () => {
+test("v8 待发落 Worker 触发待拍板，空池、文件缺失与损坏均不触发", async () => {
 	const dir = await mkdtemp(join(tmpdir(), "firecode-bark-"));
 	try {
 		const path = join(dir, "state.json");
-		await writeFile(path, JSON.stringify({ version: 7, workers: [worker("pending")] }));
+		await writeFile(path, JSON.stringify({ version: 8, workers: [worker("pending")] }));
 		expect(hasPendingDisposition(path)).toBe(true);
-		await writeFile(path, JSON.stringify({ version: 7, workers: [worker()] }));
+		await writeFile(path, JSON.stringify({ version: 8, workers: [worker()] }));
 		expect(hasPendingDisposition(path)).toBe(false);
 		expect(hasPendingDisposition(join(dir, "missing.json"))).toBe(false);
 		await writeFile(path, "not json");

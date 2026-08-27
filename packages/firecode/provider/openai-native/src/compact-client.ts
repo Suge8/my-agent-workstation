@@ -10,6 +10,11 @@ type ParsedOutput = {
 	createdAt?: unknown;
 };
 
+type ParsedFailure = {
+	reason: "input-too-large" | "response-failed";
+	detail?: string;
+};
+
 export type NativeCompactionFailureReason =
 	| "aborted"
 	| "network-error"
@@ -17,7 +22,9 @@ export type NativeCompactionFailureReason =
 	| "empty-body"
 	| "invalid-json"
 	| "malformed-response"
-	| "missing-compaction";
+	| "missing-compaction"
+	| "input-too-large"
+	| "response-failed";
 
 export type NativeCompactionResult =
 	| {
@@ -71,6 +78,33 @@ function errorMessage(value: unknown): string | undefined {
 	return undefined;
 }
 
+function providerError(value: unknown): Record<string, unknown> | undefined {
+	if (!isRecord(value)) {
+		return undefined;
+	}
+	if (isRecord(value.error)) {
+		return value.error;
+	}
+	return providerError(value.response);
+}
+
+function parseFailedResponse(value: unknown): ParsedFailure | undefined {
+	if (!isRecord(value)) {
+		return undefined;
+	}
+	const response = isRecord(value.response) ? value.response : value;
+	if (value.type !== "response.failed" && value.type !== "error" && response.status !== "failed") {
+		return undefined;
+	}
+	const error = providerError(value);
+	const code = typeof error?.code === "string" ? error.code : undefined;
+	const detail = error ? JSON.stringify(error) : errorMessage(value);
+	return {
+		reason: code === "context_length_exceeded" ? "input-too-large" : "response-failed",
+		...(detail ? { detail } : {}),
+	};
+}
+
 function parseErrorDetail(responseText: string): string | undefined {
 	try {
 		return errorMessage(JSON.parse(responseText));
@@ -90,10 +124,10 @@ function parseJsonOutput(value: unknown): ParsedOutput | undefined {
 	return { output: value.output, createdAt: value.created_at };
 }
 
-function parseSseOutput(responseText: string): ParsedOutput | { detail: string } | undefined {
+function parseSseOutput(responseText: string): ParsedOutput | ParsedFailure | undefined {
 	let completed: ParsedOutput | undefined;
 	const streamedItems: Record<string, unknown>[] = [];
-	let detail: string | undefined;
+	let failure: ParsedFailure | undefined;
 	for (const block of responseText.split(/\r?\n\r?\n/)) {
 		const data = block
 			.split(/\r?\n/)
@@ -123,9 +157,7 @@ function parseSseOutput(responseText: string): ParsedOutput | { detail: string }
 			};
 			continue;
 		}
-		if (event.type === "response.failed" || event.type === "error") {
-			detail = errorMessage(event) ?? detail;
-		}
+		failure = parseFailedResponse(event) ?? failure;
 	}
 	if (completed?.output.length) {
 		return completed;
@@ -133,16 +165,20 @@ function parseSseOutput(responseText: string): ParsedOutput | { detail: string }
 	if (completed && streamedItems.length > 0) {
 		return { output: streamedItems, createdAt: completed.createdAt };
 	}
-	return detail ? { detail } : undefined;
+	return failure;
 }
 
 function parseResponseOutput(responseText: string):
 	| { ok: true; parsed: ParsedOutput }
-	| { ok: false; reason: "invalid-json" | "malformed-response"; detail?: string } {
+	| { ok: false; reason: "invalid-json" | "malformed-response" | ParsedFailure["reason"]; detail?: string } {
 	const trimmed = responseText.trim();
 	if (trimmed.startsWith("{")) {
 		try {
 			const value = JSON.parse(trimmed);
+			const failure = parseFailedResponse(value);
+			if (failure) {
+				return { ok: false, ...failure };
+			}
 			const parsed = parseJsonOutput(value);
 			if (parsed) {
 				return { ok: true, parsed };
@@ -158,11 +194,13 @@ function parseResponseOutput(responseText: string):
 	if (sse && "output" in sse) {
 		return { ok: true, parsed: sse };
 	}
-	return {
-		ok: false,
-		reason: "malformed-response",
-		...(sse && "detail" in sse ? { detail: sse.detail } : {}),
-	};
+	return sse
+		? { ok: false, ...sse }
+		: { ok: false, reason: "malformed-response" };
+}
+
+function estimateSerializedTokens(value: unknown): number {
+	return Math.ceil(JSON.stringify(value).length / 4);
 }
 
 function isRetainedInputItem(value: unknown): value is Record<string, unknown> {
@@ -260,13 +298,24 @@ export async function executeNativeCompaction(args: {
 	}
 
 	try {
+		const input = [...request.input, COMPACTION_TRIGGER];
+		const inputTokens = estimateSerializedTokens(request.instructions) + estimateSerializedTokens(input);
+		const outputReserve = runtime.currentModel.maxTokens;
+		const contextWindow = runtime.currentModel.contextWindow;
+		if (inputTokens + outputReserve > contextWindow) {
+			return {
+				ok: false,
+				reason: "input-too-large",
+				detail: `estimated input exceeds the model context window (${inputTokens} input + ${outputReserve} output reserve > ${contextWindow} tokens)`,
+			};
+		}
 		const response = await fetch(runtime.responsesUrl, {
 			method: "POST",
 			headers: buildHeaders(runtime),
 			body: JSON.stringify({
 				model: request.model,
 				instructions: request.instructions,
-				input: [...request.input, COMPACTION_TRIGGER],
+				input,
 				store: false,
 				stream: true,
 			}),
@@ -304,6 +353,10 @@ export async function executeNativeCompaction(args: {
 	} catch (error) {
 		return isAbortError(error)
 			? { ok: false, reason: "aborted" }
-			: { ok: false, reason: "network-error" };
+			: {
+					ok: false,
+					reason: "network-error",
+					detail: error instanceof Error ? error.message : String(error),
+				};
 	}
 }

@@ -172,6 +172,97 @@ test("executeNativeCompaction accepts a streamed responses payload", async () =>
 	});
 });
 
+test("executeNativeCompaction rejects an over-window request without fetching", async () => {
+	const fetchMock = mock(async () => new Response());
+	globalThis.fetch = fetchMock as typeof fetch;
+
+	const result = await executeNativeCompaction({
+		runtime: createRuntime({
+			currentModel: { ...baseModel, contextWindow: 100, maxTokens: 20 },
+		}),
+		request: {
+			model: baseModel.id,
+			instructions: "compact this",
+			input: [{ role: "user", content: "x".repeat(400) }],
+		},
+	});
+
+	expect(result).toEqual({
+		ok: false,
+		reason: "input-too-large",
+		detail: "estimated input exceeds the model context window (119 input + 20 output reserve > 100 tokens)",
+	});
+	expect(fetchMock).not.toHaveBeenCalled();
+});
+
+test("executeNativeCompaction classifies a failed Responses event by its provider error", async () => {
+	globalThis.fetch = mock(async () =>
+		new Response(
+			[
+				"event: response.failed",
+				`data: ${JSON.stringify({
+					type: "response.failed",
+					response: {
+						status: "failed",
+						error: {
+							code: "context_length_exceeded",
+							message: "Your input exceeds the context window of this model.",
+						},
+					},
+				})}`,
+				"",
+				"data: [DONE]",
+				"",
+			].join("\n"),
+			{ status: 200, headers: { "content-type": "text/event-stream" } },
+		),
+	) as typeof fetch;
+
+	expect(
+		await executeNativeCompaction({
+			runtime: createRuntime(),
+			request: {
+				model: baseModel.id,
+				instructions: "compact this",
+				input: [{ role: "user", content: "hello" }],
+			},
+		}),
+	).toEqual({
+		ok: false,
+		reason: "input-too-large",
+		status: 200,
+		detail: '{"code":"context_length_exceeded","message":"Your input exceeds the context window of this model."}',
+	});
+});
+
+test("executeNativeCompaction reports non-window response.failed as a provider failure", async () => {
+	globalThis.fetch = mock(async () =>
+		new Response(
+			JSON.stringify({
+				status: "failed",
+				error: { code: "server_error", message: "The response failed while processing." },
+			}),
+			{ status: 200, headers: { "content-type": "application/json" } },
+		),
+	) as typeof fetch;
+
+	expect(
+		await executeNativeCompaction({
+			runtime: createRuntime(),
+			request: {
+				model: baseModel.id,
+				instructions: "compact this",
+				input: [{ role: "user", content: "hello" }],
+			},
+		}),
+	).toEqual({
+		ok: false,
+		reason: "response-failed",
+		status: 200,
+		detail: '{"code":"server_error","message":"The response failed while processing."}',
+	});
+});
+
 test("executeNativeCompaction rejects a response without exactly one compaction item", async () => {
 	globalThis.fetch = mock(async () =>
 		new Response(JSON.stringify({ output: [{ type: "message", role: "assistant", content: [] }] }), {

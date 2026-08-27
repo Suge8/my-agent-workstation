@@ -288,28 +288,117 @@ test("主会话压缩后从当前尾部重新入场，不回放旧增量", async
 });
 
 test("评估途中发生压缩时丢弃过期建议，观察员不被拖垮", async () => {
-	const harness = await setup();
-	let release!: () => void;
-	const gate = new Promise<void>((resolve) => { release = resolve; });
-	faux.appendResponses([
-		async () => {
-			await gate;
-			return fauxAssistantMessage([fauxToolCall("advise", { note: "压缩前的现场" })], { stopReason: "toolUse" });
+	let finishEvaluation!: (advice: any) => void;
+	let evaluationStarted!: () => void;
+	const started = new Promise<void>((resolve) => { evaluationStarted = resolve; });
+	const observers = [
+		{
+			evaluate: () => {
+				evaluationStarted();
+				return new Promise<any>((resolve) => { finishEvaluation = resolve; });
+			},
+			contextPercent: () => 0,
+			dispose() {},
 		},
-		fauxAssistantMessage("已提交"),
-	]);
+		{
+			evaluate: async () => ({ note: "压缩后的建议" }),
+			contextPercent: () => 0,
+			dispose() {},
+		},
+	];
+	const harness = await setup({ createObserver: async () => observers.shift() });
 	await harness.turnEnd(1, "压缩前的回合");
+	await started;
 	await harness.emit("session_compact", { type: "session_compact" });
-	release();
-	await Bun.sleep(20);
+	finishEvaluation({ note: "压缩前的现场" });
+	await Bun.sleep(0);
 	expect(harness.messages).toEqual([]);
 	expect(harness.notices).toEqual([]);
 
-	advise("压缩后的建议");
 	const delivered = harness.next();
 	await harness.turnEnd(2, "压缩后的回合");
 	await delivered;
 	expect(harness.notes()).toEqual([{ note: "压缩后的建议", turnIndex: 2 }]);
+});
+
+test("评估中切换会话后旧任务不访问旧 ctx，也不关闭新 runtime", async () => {
+	let rejectEvaluation!: (error: Error) => void;
+	let evaluationStarted!: () => void;
+	const started = new Promise<void>((resolve) => { evaluationStarted = resolve; });
+	const observers = [
+		{
+			evaluate: () => {
+				evaluationStarted();
+				return new Promise<undefined>((_resolve, reject) => { rejectEvaluation = reject; });
+			},
+			contextPercent: () => 0,
+			dispose() {},
+		},
+		{
+			evaluate: async () => ({ note: "新会话仍在工作" }),
+			contextPercent: () => 0,
+			dispose() {},
+		},
+	];
+	const harness = await setup({ createObserver: async () => observers.shift() });
+	await harness.turnEnd(1, "旧会话");
+	await started;
+	const oldContext = harness.context;
+	const nextContext = harness.createContext();
+	await harness.sessionStart(nextContext.ctx);
+	oldContext.retire();
+	rejectEvaluation(new Error("旧评估失败"));
+	await Bun.sleep(0);
+
+	expect(oldContext.staleAccesses).toEqual([]);
+	const delivered = harness.next();
+	await harness.turnEnd(2, "新会话", [], [], nextContext.ctx);
+	await delivered;
+	expect(harness.notes()).toEqual([{ note: "新会话仍在工作", turnIndex: 2 }]);
+});
+
+test("Observer 创建中切换会话时释放迟到资源且不执行旧评估", async () => {
+	let releaseCreation!: (observer: any) => void;
+	let creationStarted!: () => void;
+	const started = new Promise<void>((resolve) => { creationStarted = resolve; });
+	let lateEvaluations = 0;
+	let lateDisposals = 0;
+	const lateObserver = {
+		evaluate: async () => { lateEvaluations += 1; return undefined; },
+		contextPercent: () => 0,
+		dispose: () => { lateDisposals += 1; },
+	};
+	let creation = 0;
+	const harness = await setup({
+		createObserver: async () => {
+			creation += 1;
+			if (creation === 1) {
+				creationStarted();
+				return new Promise<any>((resolve) => { releaseCreation = resolve; });
+			}
+			return {
+				evaluate: async () => ({ note: "新 owner 的建议" }),
+				contextPercent: () => 0,
+				dispose() {},
+			};
+		},
+	});
+	await harness.turnEnd(1, "旧会话");
+	await started;
+	const oldContext = harness.context;
+	const nextContext = harness.createContext();
+	await harness.sessionStart(nextContext.ctx);
+	oldContext.retire();
+	releaseCreation(lateObserver);
+	await Bun.sleep(0);
+
+	expect(lateEvaluations).toBe(0);
+	expect(lateDisposals).toBe(1);
+	expect(oldContext.staleAccesses).toEqual([]);
+	const delivered = harness.next();
+	await harness.turnEnd(2, "新会话", [], [], nextContext.ctx);
+	await delivered;
+	expect(harness.notes()).toEqual([{ note: "新 owner 的建议", turnIndex: 2 }]);
 });
 
 test("Worker 会话内不注册观察员", async () => {
@@ -336,6 +425,7 @@ async function setup(options: {
 	watcher?: Record<string, unknown> | null;
 	worker?: boolean;
 	features?: Record<string, unknown>;
+	createObserver?: (...args: any[]) => Promise<any>;
 } = {}) {
 	directory = await mkdtemp(join(tmpdir(), "firecode-watcher-"));
 	const cwd = join(directory, "project");
@@ -401,25 +491,44 @@ async function setup(options: {
 	};
 	const sessionId = crypto.randomUUID();
 	const main = SessionManager.create(cwd, sessionDir);
-	const ctx = {
-		cwd,
-		isIdle: () => idle,
-		sessionManager: {
-			getSessionId: () => sessionId,
-			getSessionFile: () => main.getSessionFile(),
-			getEntries: () => [],
-		},
-		ui: {
-			notify: (message: string) => notices.push(message),
-			setStatus: (key: string, value: string | undefined) => {
-				if (value === undefined) statuses.delete(key);
-				else statuses.set(key, value);
+	const createContext = () => {
+		let retired = false;
+		const staleAccesses: string[] = [];
+		const raw = {
+			cwd,
+			isIdle: () => idle,
+			sessionManager: {
+				getSessionId: () => sessionId,
+				getSessionFile: () => main.getSessionFile(),
+				getEntries: () => [],
 			},
-			theme: { fg: (_color: string, text: string) => text },
-		},
+			ui: {
+				notify: (message: string) => notices.push(message),
+				setStatus: (key: string, value: string | undefined) => {
+					if (value === undefined) statuses.delete(key);
+					else statuses.set(key, value);
+				},
+				theme: { fg: (_color: string, text: string) => text },
+			},
+		};
+		const ctx = new Proxy(raw, {
+			get(target, property, receiver) {
+				if (retired) {
+					staleAccesses.push(String(property));
+					throw new Error(`stale ctx.${String(property)}`);
+				}
+				return Reflect.get(target, property, receiver);
+			},
+		});
+		return { ctx, staleAccesses, retire: () => { retired = true; } };
 	};
-	module.registerWatcher(pi, { pool, resolveModel: async () => fauxModel }, options.worker === true);
-	const emit = async (name: string, event: any) => {
+	const context = createContext();
+	module.registerWatcher(pi, {
+		pool,
+		resolveModel: async () => fauxModel,
+		...(options.createObserver ? { createObserver: options.createObserver } : {}),
+	}, options.worker === true);
+	const emit = async (name: string, event: any, ctx = context.ctx) => {
 		for (const handler of handlers.get(name) ?? []) await handler(event, ctx);
 	};
 	await emit("session_start", { type: "session_start", reason: "startup" });
@@ -434,14 +543,17 @@ async function setup(options: {
 		registeredEvents: [...handlers.keys()],
 		pi,
 		emit,
+		context,
+		createContext,
+		sessionStart: (ctx: any) => emit("session_start", { type: "session_start", reason: "switch" }, ctx),
 		next: () => new Promise<void>((resolve) => { waiter = () => { waiter = undefined; resolve(); }; }),
-		command: (args: string) => commands.get("fire-watch").handler(args, ctx),
-		turnEnd: (turnIndex: number, text: string, toolResults: any[] = [], toolCalls: any[] = []) =>
+		command: (args: string) => commands.get("fire-watch").handler(args, context.ctx),
+		turnEnd: (turnIndex: number, text: string, toolResults: any[] = [], toolCalls: any[] = [], ctx = context.ctx) =>
 			emit("turn_end", {
 				type: "turn_end",
 				turnIndex,
 				message: { role: "assistant", content: [{ type: "text", text }, ...toolCalls] },
 				toolResults,
-			}),
+			}, ctx),
 	};
 }

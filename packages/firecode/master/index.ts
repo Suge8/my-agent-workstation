@@ -12,7 +12,7 @@ import {
 	type ExtensionAPI,
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { loadConfig, type MasterModel } from "../config.js";
+import { MASTER_ROLES, loadConfig, type MasterModelAtom, type MasterRole } from "../config.js";
 import { deliver } from "../deliver.js";
 import { formatDuration } from "../format.js";
 import { readReviewOutcome, type ReviewOutcome } from "../review/outcome.js";
@@ -20,6 +20,7 @@ import { ToolLine, makeResultRenderer } from "../tools/line.js";
 import type { Part } from "../tools/parts.js";
 import { registerMasterEventRenderer } from "./event-card.js";
 import { MASTER_EVENT_TYPE, masterEventDetails, sectionLine } from "./event-format.js";
+import { assembleMasterPrompt, assembleWorkerPrompt, readMasterPrompt } from "./prompt.js";
 import { InProcessSessionPool, preallocateWorkerSession } from "./spawn.js";
 import {
 	MasterStore,
@@ -65,6 +66,12 @@ interface ReviewProgress {
 	total: number;
 }
 
+interface WorkerTerminal {
+	text: string;
+	stopReason?: string;
+	errorMessage?: string;
+}
+
 interface ObservedSession {
 	session: AgentSession;
 	unsubscribe: () => void;
@@ -97,10 +104,15 @@ export function registerMaster(
 	}
 	let runtime: MasterRuntime | undefined;
 	const loaded = loadMasterConfiguration();
-	const roster = "error" in loaded ? [] : loaded.models;
-	const guidelines = masterGuidelines(roster).join("\n");
+	const prompts = loadMasterPrompts();
+	const startupError = "error" in loaded ? loaded.error : "error" in prompts ? prompts.error : undefined;
+	const roster = "error" in loaded ? [] : loaded.roles;
 	const exclusions = "error" in loaded ? [] : loaded.workerExcludeExtensions;
 	const autoActivate = "error" in loaded ? false : loaded.autoActivate;
+	const requirePrompts = () => {
+		if ("error" in prompts) throw new Error(prompts.error);
+		return prompts;
+	};
 	const reviewGate = reviewGateError();
 	const pool = dependencies.pool ?? new InProcessSessionPool();
 	const activeRuns = new Map<string, symbol>();
@@ -114,18 +126,43 @@ export function registerMaster(
 		const tools = pi.getActiveTools().filter((name) => !MASTER_TOOLS.includes(name));
 		pi.setActiveTools(active ? [...tools, ...MASTER_TOOLS] : tools);
 	};
+	const ownsRuntime = (active: MasterRuntime): boolean => runtime === active;
+	const requireRuntimeOwner = (active: MasterRuntime): void => {
+		if (!ownsRuntime(active)) throw new Error("Master 会话已替换，取消旧会话动作");
+	};
+	let spinFrame = 0;
+	let spinTimer: ReturnType<typeof setInterval> | undefined;
+	/** 计时器只在活动期存活：状态变化起停，全部落定即停，无常驻轮询。 */
+	const syncSpinner = (active: boolean) => {
+		if (active === (spinTimer !== undefined)) return;
+		if (!active) {
+			clearInterval(spinTimer);
+			spinTimer = undefined;
+			return;
+		}
+		spinTimer = setInterval(() => {
+			spinFrame += 1;
+			renderStatus();
+		}, SPINNER_MS);
+		spinTimer.unref?.();
+	};
 	const renderStatus = () => {
 		if (!runtime) return;
-		runtime.ctx.ui.setStatus("master", masterStatusLine(runtime.store.state.workers, runtime.ctx.ui.theme));
+		const workers = runtime.store.state.workers;
+		syncSpinner(masterActive(workers));
+		runtime.ctx.ui.setStatus("master", masterStatusLine(workers, runtime.ctx.ui.theme, spinFrame));
 	};
 	const activate = (ctx: ExtensionContext, restored?: MasterState): MasterRuntime => {
-		if ("error" in loaded) throw new Error(loaded.error);
+		if (startupError) throw new Error(startupError);
 		if (runtime) {
 			runtime.ctx = ctx;
 			return runtime;
 		}
-		const store = new MasterStore(masterStatePath(ctx.sessionManager.getSessionId()), restored, renderStatus);
-		runtime = {
+		let active!: MasterRuntime;
+		const store = new MasterStore(masterStatePath(ctx.sessionManager.getSessionId()), restored, () => {
+			if (ownsRuntime(active)) renderStatus();
+		});
+		active = {
 			ctx,
 			store,
 			pool,
@@ -135,29 +172,34 @@ export function registerMaster(
 			reviewProgress: new Map(),
 			observedSessions: new Map(),
 		};
+		runtime = active;
 		setTools(true);
 		if (store.discardedLegacyVersion !== undefined)
 			ctx.ui.notify(`旧版 v${store.discardedLegacyVersion} 子代理池已丢弃并从空池重建；旧运行时进程不会纳入新池，请手动清理`, "warning");
 		// store 创建时 runtime 尚未就位，激活完成后只补这一次首绘。
 		renderStatus();
-		return runtime;
+		return active;
 	};
 	const deactivate = () => {
 		const active = runtime;
 		runtime = undefined;
 		pool.disposeAll();
+		syncSpinner(false);
 		for (const timer of interruptTimers.values()) clearTimeout(timer);
 		interruptTimers.clear();
 		activeRuns.clear();
 		interruptedRuns.clear();
+		startingNames.clear();
+		transitioningNames.clear();
 		if (active?.flushTimer) clearTimeout(active.flushTimer);
 		for (const observed of active?.observedSessions.values() ?? []) observed.unsubscribe();
 		active?.ctx.ui.setStatus("master", undefined);
 		setTools(false);
 	};
 	const flushEvents = (active: MasterRuntime) => {
+		if (!ownsRuntime(active)) return;
 		active.flushTimer = undefined;
-		if (runtime !== active || !active.events.length) return;
+		if (!active.events.length) return;
 		const batch = active.events.splice(0);
 		const content = batch.map((event) => event.content).join("\n\n");
 		deliver(pi, active.ctx, {
@@ -165,6 +207,7 @@ export function registerMaster(
 			content: masterEventEnvelope(content),
 			details: masterEventDetails(batch.map((event) => event.content)),
 		}).then(() => {
+			if (!ownsRuntime(active)) return;
 			try {
 				pi.appendEntry(EVENT_ACK_TYPE, { ids: batch.map((event) => event.id) });
 			} catch (error) {
@@ -177,6 +220,7 @@ export function registerMaster(
 					active.store.dispatch({ type: "UPSERT_WORKER", worker: { ...worker, disposition: "pending" } });
 			}
 		}, (error) => {
+			if (!ownsRuntime(active)) return;
 			active.events.unshift(...batch);
 			active.ctx.ui.notify(`子代理结果投递失败，将自动重试：${String(error)}`, "warning");
 			active.flushTimer = setTimeout(() => flushEvents(active), EVENT_RETRY_MS);
@@ -190,6 +234,7 @@ export function registerMaster(
 		persist = true,
 		id = crypto.randomUUID(),
 	) => {
+		if (!ownsRuntime(active)) return;
 		const event: PendingMasterEvent = { id, content, ...(worker ? { worker } : {}) };
 		if (persist) {
 			try {
@@ -210,10 +255,12 @@ export function registerMaster(
 		interruptTimers.delete(name);
 	};
 	const armInterruptReminder = (active: MasterRuntime, worker: WorkerRef) => {
+		if (!ownsRuntime(active)) return;
 		clearInterruptTimer(worker.name);
 		const duration = dependencies.interruptResumeMs ?? 5 * 60_000;
 		const delay = Math.max(0, (worker.interruptedAt ?? Date.now()) + duration - Date.now());
 		const timer = setTimeout(() => {
+			if (!ownsRuntime(active)) return;
 			interruptTimers.delete(worker.name);
 			const current = active.store.state.workers.find((candidate) => candidate.name === worker.name);
 			if (!current?.interruptedAt || current.interruptedAt !== worker.interruptedAt) return;
@@ -245,33 +292,42 @@ export function registerMaster(
 		return active;
 	};
 	const currentWorker = (active: MasterRuntime, identity: WorkerRef) => {
+		requireRuntimeOwner(active);
 		const current = active.store.state.workers.find((worker) => worker.name === identity.name);
 		if (current?.sessionPath === identity.sessionPath) return current;
 		active.pool.dispose(identity.sessionPath);
 		throw new Error(`${identity.name} 已被 kill，取消本次动作`);
 	};
-	const openWorkerSession = async (worker: WorkerRef) => {
-		const hot = pool.getSession(worker.sessionPath);
+	const openWorkerSession = async (active: MasterRuntime, worker: WorkerRef) => {
+		requireRuntimeOwner(active);
+		const hot = active.pool.getSession(worker.sessionPath);
 		if (hot) return hot;
 		const model = await (dependencies.resolveModel ?? resolveConfiguredModel)(worker.model);
-		const spawned = await pool.spawn({
+		requireRuntimeOwner(active);
+		const spawned = await active.pool.spawn({
 			cwd: worker.cwd ?? process.cwd(),
 			role: "worker",
 			model,
 			thinking: worker.thinking,
 			tools: WORKER_TOOLS,
 			excludeExtensions: exclusions,
-			systemPrompt: { mode: "append", text: workerInstructions(worker.name) },
+			systemPrompt: { mode: "append", text: assembleWorkerPrompt(requirePrompts().worker, worker.name) },
 			contextFiles: true,
 			persistence: { type: "file", sessionPath: worker.sessionPath, resume: true },
 		});
+		if (!ownsRuntime(active)) {
+			spawned.dispose();
+			requireRuntimeOwner(active);
+		}
 		return spawned.session;
 	};
 	const observeWorker = (active: MasterRuntime, sessionPath: string, session: AgentSession) => {
+		requireRuntimeOwner(active);
 		const previous = active.observedSessions.get(sessionPath);
 		if (previous?.session === session) return;
 		previous?.unsubscribe();
 		const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
+			if (!ownsRuntime(active)) return;
 			if (event.type === "tool_execution_start") {
 				const tools = active.currentTools.get(sessionPath) ?? new Map<string, CurrentTool>();
 				tools.set(event.toolCallId, { tool: event.toolName, startedAt: Date.now() });
@@ -290,11 +346,18 @@ export function registerMaster(
 		active.observedSessions.set(sessionPath, { session, unsubscribe });
 	};
 	const runWorker = (active: MasterRuntime, worker: WorkerRef, session: Awaited<ReturnType<typeof openWorkerSession>>, prompt: string) => {
+		requireRuntimeOwner(active);
 		observeWorker(active, worker.sessionPath, session);
 		const run = Symbol(worker.name);
+		let terminal: WorkerTerminal | undefined;
 		activeRuns.set(worker.sessionPath, run);
-		const settled = (error?: unknown) => {
-			if (activeRuns.get(worker.sessionPath) !== run) return;
+		const unsubscribeTerminal = session.subscribe((event) => {
+			if (!ownsRuntime(active) || activeRuns.get(worker.sessionPath) !== run || event.type !== "agent_end") return;
+			terminal = captureWorkerTerminal(event.messages);
+		});
+		const settled = async (error?: unknown) => {
+			unsubscribeTerminal();
+			if (!ownsRuntime(active) || activeRuns.get(worker.sessionPath) !== run) return;
 			activeRuns.delete(worker.sessionPath);
 			if (interruptedRuns.get(worker.sessionPath) === run) {
 				interruptedRuns.delete(worker.sessionPath);
@@ -308,10 +371,56 @@ export function registerMaster(
 				armInterruptReminder(active, interrupted);
 				return;
 			}
-			const content = settleWorker(active, worker, session.messages, error);
+			const fault = providerFaultReason(terminal);
+			if (fault && error === undefined) {
+				await resumeWithFallback(active, worker, session, terminal!, fault);
+				return;
+			}
+			const content = settleWorker(active, worker, terminal, error);
 			if (content) enqueueEvent(active, content, worker.name);
 		};
-		void session.prompt(prompt).then(() => settled(), settled);
+		void session.prompt(prompt).then(() => void settled(), (error) => void settled(error));
+	};
+	const resumeWithFallback = async (
+		active: MasterRuntime,
+		identity: WorkerRef,
+		session: Awaited<ReturnType<typeof openWorkerSession>>,
+		terminal: WorkerTerminal,
+		reason: string,
+	) => {
+		const current = currentWorker(active, identity);
+		const configuredRole = roster.find((entry) => entry.role === current.role);
+		if (!configuredRole) {
+			const failure = `${terminalFailure(terminal)}\n角色 ${current.role} 已不在角色表，无法 fallback`;
+			const content = settleWorker(active, current, terminal, new Error(failure));
+			if (content) enqueueEvent(active, content, current.name);
+			return;
+		}
+		const fallback = nextFallback(configuredRole, current);
+		if (!fallback) {
+			const failure = `${terminalFailure(terminal)}\n角色 ${current.role} 的 fallback 链已用尽`;
+			const content = settleWorker(active, current, terminal, new Error(failure));
+			if (content) enqueueEvent(active, content, current.name);
+			return;
+		}
+		try {
+			const model = await (dependencies.resolveModel ?? resolveConfiguredModel)(fallback.model);
+			requireRuntimeOwner(active);
+			await session.setModel(model);
+			requireRuntimeOwner(active);
+			session.setThinkingLevel(fallback.thinking);
+			const latest = currentWorker(active, current);
+			const switched: WorkerRef = { ...latest, ...fallback, status: "working" };
+			active.store.dispatch({ type: "UPSERT_WORKER", worker: switched });
+			const from = modelAtomText(current);
+			const to = modelAtomText(fallback);
+			enqueueEvent(active, `子代理 ${current.name} 已切换 ${from}→${to}（${reason}），正在同一会话自动续跑`, current.name);
+			runWorker(active, switched, session, fallbackResumePrompt(from, to, reason));
+		} catch (error) {
+			const failure = `${terminalFailure(terminal)}\nfallback 切换失败：${error instanceof Error ? error.message : String(error)}`;
+			const content = settleWorker(active, current, terminal, new Error(failure));
+			if (content) enqueueEvent(active, content, current.name);
+		}
 	};
 
 	pi.registerCommand("fire-master", {
@@ -342,7 +451,9 @@ export function registerMaster(
 
 	pi.on("before_agent_start", async (event) => {
 		if (!runtime || !pi.getActiveTools().includes(MASTER_TOOL)) return;
-		return { systemPrompt: `${event.systemPrompt}\n\n${guidelines}` };
+		return {
+			systemPrompt: `${event.systemPrompt}\n\n${assembleMasterPrompt(requirePrompts().master, rosterText(roster))}`,
+		};
 	});
 
 	pi.registerTool({
@@ -379,7 +490,7 @@ export function registerMaster(
 	pi.registerTool({
 		name: MASTER_TOOL,
 		label: "子代理",
-		description: "指挥官的七动作子代理接口：start 新建，send 续派或切换模型，interrupt 中断，review 显式审查，tail 读轨迹，ack 确认落定，kill 收口移除；无 sleep/session。",
+		description: "指挥官的七动作子代理接口：start 按角色新建，send 续派或切换角色，interrupt 中断，review 显式审查，tail 读轨迹，ack 确认落定，kill 收口移除；无 sleep/session。",
 		renderShell: "self",
 		renderCall: (args, theme, ctx) =>
 			new ToolLine({ label: "子代理", value: subagentsCallParts(args as Record<string, unknown>), clip: "end", theme, ctx }),
@@ -390,8 +501,8 @@ export function registerMaster(
 			}),
 			worker: Type.String({ description: "start 起简短任务名；其余动作填目标 Worker。" }),
 			prompt: Type.Optional(Type.String({ description: "start/send 必填自包含任务说明，包括交付物、限制与验证要求。" })),
-			model: Type.Optional(Type.String({ description: "start 必填：从选型表选 provider/model；send 可传以原地切换，省略则沿用。" })),
-			thinking: Type.Optional(StringEnum(THINKING_LEVELS, { description: "start 必填；send 可传以原地切换思考档，省略则沿用。" })),
+			role: Type.Optional(StringEnum(MASTER_ROLES, { description: "start 必填固定角色；send 可选，传入时切换角色，省略则沿用。" })),
+			thinking: Type.Optional(StringEnum(THINKING_LEVELS, { description: "可选思考档覆盖；省略时使用角色原子档或当前档。" })),
 			cwd: Type.Optional(Type.String({ description: "仅 start 可选：Worker 工作目录的绝对路径，默认当前目录。" })),
 			review: Type.Optional(Type.Boolean({ description: "按审查纪律为 start/send 记录义务；true 不自动开审。" })),
 		}),
@@ -433,8 +544,9 @@ export function registerMaster(
 					throw new Error(`${target.name} 正在处理其他动作，不能 review`);
 				transitioningNames.add(target.name);
 				try {
-					const session = await openWorkerSession(target);
+					const session = await openWorkerSession(active, target);
 					await session.waitForIdle();
+					requireRuntimeOwner(active);
 					observeWorker(active, target.sessionPath, session);
 					const current = currentWorker(active, target);
 					const previousRunId = reviewRunId(readReviewOutcome(target.sessionPath));
@@ -445,6 +557,7 @@ export function registerMaster(
 					active.store.dispatch({ type: "UPSERT_WORKER", worker: reviewing });
 					void monitorReview(session, target.sessionPath, previousRunId).then(
 						(outcome) => {
+							if (!ownsRuntime(active)) return;
 							const current = active.store.state.workers.find((worker) => worker.name === target.name);
 							if (!current || current.sessionPath !== target.sessionPath || current.status !== "reviewing") return;
 							const { reviewNeeded: _needed, ...fulfilled } = current;
@@ -458,6 +571,7 @@ export function registerMaster(
 							enqueueEvent(active, reviewOutcomeText(target.name, outcome, session.messages), target.name);
 						},
 						(error) => {
+							if (!ownsRuntime(active)) return;
 							const current = active.store.state.workers.find((worker) => worker.name === target.name);
 							if (!current || current.status !== "reviewing") return;
 							active.store.dispatch({ type: "UPSERT_WORKER", worker: { ...current, status: "idle" } });
@@ -469,7 +583,7 @@ export function registerMaster(
 					);
 					return toolResult({ reviewing: true });
 				} finally {
-					transitioningNames.delete(target.name);
+					if (ownsRuntime(active)) transitioningNames.delete(target.name);
 				}
 			}
 			if (params.action === "interrupt") {
@@ -482,9 +596,10 @@ export function registerMaster(
 				interruptedRuns.set(target.sessionPath, run);
 				try {
 					await session.abort();
+					requireRuntimeOwner(active);
 					return toolResult({ interrupted: true });
 				} catch (error) {
-					if (interruptedRuns.get(target.sessionPath) === run) interruptedRuns.delete(target.sessionPath);
+					if (ownsRuntime(active) && interruptedRuns.get(target.sessionPath) === run) interruptedRuns.delete(target.sessionPath);
 					throw error;
 				}
 			}
@@ -493,9 +608,8 @@ export function registerMaster(
 				const target = requireWorker(active.store.state, requiredString(params.worker, "worker"));
 				if (target.status !== "idle" || transitioningNames.has(target.name))
 					throw new Error(`${target.name} 正在处理其他动作；急件先 interrupt 再 send`);
-				const requestedModel = optionalString(params.model);
-				if (requestedModel && !roster.some((entry) => entry.model === requestedModel))
-					throw new Error(`model 不在选型表：${requestedModel}。选型表：${rosterText(roster)}`);
+				const requestedRole = optionalString(params.role);
+				const selection = requestedRole ? resolveRole(roster, requestedRole) : undefined;
 				const requestedThinking = optionalString(params.thinking);
 				if (requestedThinking && !THINKING_LEVELS.includes(requestedThinking as WorkerRef["thinking"]))
 					throw new Error(`thinking 值无效：${requestedThinking}`);
@@ -503,25 +617,32 @@ export function registerMaster(
 				validateDelegationText(prompt);
 				transitioningNames.add(target.name);
 				try {
-					const nextModel = requestedModel
-						? await (dependencies.resolveModel ?? resolveConfiguredModel)(requestedModel)
+					const nextModel = selection
+						? await (dependencies.resolveModel ?? resolveConfiguredModel)(selection.model)
 						: undefined;
-					const session = await openWorkerSession(target);
+					requireRuntimeOwner(active);
+					const session = await openWorkerSession(active, target);
 					await session.waitForIdle();
+					requireRuntimeOwner(active);
+					let role = target.role;
 					let model = target.model;
 					let thinking = target.thinking;
-					if (requestedModel && nextModel) {
+					if (selection && nextModel) {
 						await session.setModel(nextModel);
-						model = requestedModel;
+						requireRuntimeOwner(active);
+						role = selection.role;
+						model = selection.model;
+						thinking = selection.thinking;
 					}
-					if (requestedThinking) {
-						session.setThinkingLevel(requestedThinking as WorkerRef["thinking"]);
-						thinking = requestedThinking as WorkerRef["thinking"];
+					if (selection || requestedThinking) {
+						thinking = requestedThinking as WorkerRef["thinking"] | undefined ?? thinking;
+						session.setThinkingLevel(thinking);
 					}
 					const current = currentWorker(active, target);
 					const { disposition: _disposition, interruptedAt, ...rest } = current;
 					const activeWorker: WorkerRef = {
 						...rest,
+						role,
 						model,
 						thinking,
 						status: "working",
@@ -534,7 +655,7 @@ export function registerMaster(
 					runWorker(active, activeWorker, session, text);
 					return toolResult({ sent: true });
 				} finally {
-					transitioningNames.delete(target.name);
+					if (ownsRuntime(active)) transitioningNames.delete(target.name);
 				}
 			}
 			if (params.action !== "start") throw new Error(`未知 subagents action：${String(params.action)}`);
@@ -550,15 +671,24 @@ export function registerMaster(
 				throw new Error(`Worker 并发上限 15，当前在飞：${[...inFlight.map((worker) => worker.name), ...startingNames].join("、")}`);
 			const prompt = requiredString(params.prompt, "prompt");
 			validateDelegationText(prompt);
-			const selection = resolveSelection(roster, params);
+			const selectedRole = resolveRole(roster, requiredString(params.role, "start 必须指定 role"));
+			const requestedThinking = optionalString(params.thinking);
+			if (requestedThinking && !THINKING_LEVELS.includes(requestedThinking as WorkerRef["thinking"]))
+				throw new Error(`thinking 值无效：${requestedThinking}`);
+			const selection = {
+				...selectedRole,
+				thinking: requestedThinking as WorkerRef["thinking"] | undefined ?? selectedRole.thinking,
+			};
 			startingNames.add(name);
 			try {
 				const cwd = await resolveWorkerCwd(optionalString(params.cwd) ?? ctx.cwd);
+				requireRuntimeOwner(active);
 				const mainSessionPath = ctx.sessionManager.getSessionFile?.();
 				if (!mainSessionPath) throw new Error("主会话尚未落盘，无法创建子代理会话目录");
 				const sessionPath = preallocateWorkerSession(mainSessionPath, cwd);
 				const worker: WorkerRef = {
 					name,
+					role: selection.role,
 					model: selection.model,
 					thinking: selection.thinking,
 					status: "working",
@@ -570,6 +700,7 @@ export function registerMaster(
 				startingNames.delete(name);
 				try {
 					const model = await (dependencies.resolveModel ?? resolveConfiguredModel)(selection.model);
+					requireRuntimeOwner(active);
 					const spawned = await active.pool.spawn({
 						cwd,
 						role: "worker",
@@ -577,25 +708,29 @@ export function registerMaster(
 						thinking: selection.thinking,
 						tools: WORKER_TOOLS,
 						excludeExtensions: exclusions,
-						systemPrompt: { mode: "append", text: workerInstructions(name) },
+						systemPrompt: { mode: "append", text: assembleWorkerPrompt(requirePrompts().worker, name) },
 						contextFiles: true,
 						persistence: { type: "file", sessionPath },
 					});
+					if (!ownsRuntime(active)) {
+						spawned.dispose();
+						requireRuntimeOwner(active);
+					}
 					runWorker(active, worker, spawned.session, prompt);
 					return toolResult({ started: true, worker: compactWorker(worker) });
 				} catch (error) {
-					active.store.dispatch({ type: "REMOVE_WORKER", name });
+					if (ownsRuntime(active)) active.store.dispatch({ type: "REMOVE_WORKER", name });
 					throw error;
 				}
 			} finally {
-				startingNames.delete(name);
+				if (ownsRuntime(active)) startingNames.delete(name);
 			}
 		},
 	});
 
 	pi.on("session_start", (_event, ctx) => {
 		deactivate();
-		if (!autoActivate || "error" in loaded) return;
+		if (!autoActivate) return;
 		try {
 			activateSession(ctx);
 		} catch (error) {
@@ -609,7 +744,7 @@ export function registerMaster(
 function settleWorker(
 	active: MasterRuntime,
 	identity: WorkerRef,
-	messages: Array<{ role: string; content?: unknown; stopReason?: string; errorMessage?: string }>,
+	terminal: WorkerTerminal | undefined,
 	error?: unknown,
 ): string | undefined {
 	const current = active.store.state.workers.find((worker) => worker.name === identity.name);
@@ -618,10 +753,10 @@ function settleWorker(
 	active.currentTools.delete(identity.sessionPath);
 	active.idleSince.set(identity.sessionPath, Date.now());
 	const obligation = current.reviewNeeded ? "\n此票有审查义务，请显式 review。" : "";
-	const failure = error instanceof Error ? error.message : error === undefined ? latestAssistantError(messages) : String(error);
+	const failure = error instanceof Error ? error.message : error === undefined ? terminalFailure(terminal) : String(error);
 	return failure
 		? `子代理 ${identity.name} 已停下\n${sectionLine("error")}\n${failure}${obligation}`
-		: `子代理 ${identity.name} 已停下\n${sectionLine("reply")}\n${latestAssistantText(messages) || "（无回复）"}${obligation}`;
+		: `子代理 ${identity.name} 已停下\n${sectionLine("reply")}\n${terminal!.text}${obligation}`;
 }
 
 function unackedEvents(ctx: ExtensionContext): PendingMasterEvent[] {
@@ -644,10 +779,17 @@ function unackedEvents(ctx: ExtensionContext): PendingMasterEvent[] {
 function monitorReview(
 	session: { subscribe: (listener: (event: { type: string }) => void) => () => void; prompt: (text: string) => Promise<void> },
 	sessionPath: string,
-	previousRunId?: string,
+	previousRunId: string | undefined,
 ): Promise<ReviewOutcome> {
 	return new Promise((resolve, reject) => {
 		let settled = false;
+		let unsubscribe = () => {};
+		const fail = (error: unknown) => {
+			if (settled) return;
+			settled = true;
+			unsubscribe();
+			reject(error);
+		};
 		const finish = (outcome: ReviewOutcome) => {
 			if (settled) return;
 			const runId = reviewRunId(outcome);
@@ -657,15 +799,9 @@ function monitorReview(
 			unsubscribe();
 			resolve(outcome);
 		};
-		const unsubscribe = session.subscribe((event) => {
+		unsubscribe = session.subscribe((event) => {
 			if (event.type === "entry_appended") finish(readReviewOutcome(sessionPath));
 		});
-		const fail = (error: unknown) => {
-			if (settled) return;
-			settled = true;
-			unsubscribe();
-			reject(error);
-		};
 		void session.prompt("/fire-review").then(
 			() => {
 				const outcome = readReviewOutcome(sessionPath);
@@ -697,17 +833,46 @@ function reviewOutcomeText(
 	return `子代理 ${name} 审查未完成`;
 }
 
-function latestAssistantError(
-	messages: Array<{ role: string; stopReason?: string; errorMessage?: string }>,
-): string | undefined {
+function captureWorkerTerminal(
+	messages: Array<{ role: string; content?: unknown; stopReason?: string; errorMessage?: string }>,
+): WorkerTerminal | undefined {
 	const message = messages.findLast((candidate) => candidate.role === "assistant");
-	return message?.stopReason === "error" ? message.errorMessage || "未知错误" : undefined;
+	if (!message) return undefined;
+	return {
+		text: assistantText(message.content),
+		...(message.stopReason ? { stopReason: message.stopReason } : {}),
+		...(message.errorMessage ? { errorMessage: message.errorMessage } : {}),
+	};
+}
+
+function terminalFailure(terminal: WorkerTerminal | undefined): string | undefined {
+	if (!terminal) return "回合结束但未产生 assistant 终态";
+	if (terminal.stopReason === "error") return terminal.errorMessage || "供应商返回未知错误";
+	if (terminal.stopReason === "aborted") return `回合意外中止：${terminal.errorMessage || "供应商未提供原因"}`;
+	if (!terminal.text) return "回合结束但未产生回复";
+	return undefined;
+}
+
+function providerFaultReason(terminal: WorkerTerminal | undefined): string | undefined {
+	if (terminal?.stopReason !== "error" || !terminal.errorMessage) return undefined;
+	const message = terminal.errorMessage;
+	if (/GoUsageLimitError|FreeUsageLimitError|Monthly usage limit reached|available balance|insufficient_quota|out of budget|quota (?:exceeded|exhausted)|billing/iu.test(message))
+		return "额度或计费耗尽";
+	if (/(?:model|deployment).*(?:not found|does not exist|unavailable|not available|unsupported)|(?:not found|unavailable).*(?:model|deployment)/iu.test(message))
+		return "模型不可用或找不到";
+	if (/\b(?:500|502|503|504|524)\b|service.?unavailable|internal.?server.?error/iu.test(message))
+		return "持续 5xx，宿主重试已用尽";
+	return undefined;
 }
 
 function latestAssistantText(messages: Array<{ role: string; content?: unknown }>): string {
 	const message = messages.findLast((candidate) => candidate.role === "assistant");
-	if (!message || !Array.isArray(message.content)) return "";
-	return message.content
+	return assistantText(message?.content);
+}
+
+function assistantText(content: unknown): string {
+	if (!Array.isArray(content)) return "";
+	return content
 		.filter((part): part is { type: "text"; text: string } =>
 			!!part && typeof part === "object" && (part as { type?: unknown }).type === "text"
 			&& typeof (part as { text?: unknown }).text === "string")
@@ -734,6 +899,17 @@ function reviewGateError(): string | undefined {
 	return problems.length ? `fire-review 配置有问题，已停止：${problems.join("；")}` : undefined;
 }
 
+function loadMasterPrompts() {
+	try {
+		return {
+			master: readMasterPrompt("master"),
+			worker: readMasterPrompt("worker"),
+		};
+	} catch (error) {
+		return { error: error instanceof Error ? error.message : String(error) };
+	}
+}
+
 function loadMasterConfiguration() {
 	let loaded: ReturnType<typeof loadConfig>;
 	try {
@@ -741,45 +917,36 @@ function loadMasterConfiguration() {
 	} catch (error) {
 		return { error: `Master 配置读取失败：${error instanceof Error ? error.message : String(error)}` };
 	}
-	const problems = loaded.problems.filter((problem) => problem.startsWith("master") || problem.startsWith("未知字段 master.") || problem.startsWith("config.jsonc") || problem.startsWith("features"));
+	const problems = loaded.problems.filter((problem) => problem.startsWith("master") || problem.startsWith("未知字段 master.") || problem.startsWith("未知角色 master.") || problem.startsWith("config.jsonc") || problem.startsWith("features"));
 	if (problems.length) return { error: `Master 配置有问题，已停止：${problems.join("；")}` };
-	if (!loaded.config.master.models.length) return { error: "Master 配置有问题，已停止：请显式配置 master.models 选型表" };
+	if (!loaded.config.master.roles.length) return { error: "Master 配置有问题，已停止：请在 master.roles 至少配置一个角色" };
 	return loaded.config.master;
 }
 
-function resolveSelection(models: MasterModel[], params: Record<string, unknown>) {
-	const model = optionalString(params.model);
-	const entry = models.find((candidate) => candidate.model === model);
-	if (!entry) {
-		const reason = model ? `model 不在选型表：${model}` : "start 必须显式指定 model";
-		throw new Error(`${reason}。选型表：${rosterText(models)}`);
-	}
-	const thinking = optionalString(params.thinking);
-	if (!thinking) throw new Error(`start 必须显式指定 thinking：${entry.model} 默认档是 ${entry.thinking}`);
-	if (!THINKING_LEVELS.includes(thinking as WorkerRef["thinking"])) throw new Error(`thinking 值无效：${thinking}`);
-	return { model: entry.model, thinking: thinking as WorkerRef["thinking"] };
+function resolveRole(roles: MasterRole[], role: string): MasterRole {
+	const entry = roles.find((candidate) => candidate.role === role);
+	if (!entry) throw new Error(`角色未配置：${role}。已配置角色：${roles.map((candidate) => candidate.role).join("、")}`);
+	return entry;
 }
 
-function rosterText(models: MasterModel[]): string {
-	return models.map((entry) => `${entry.model}（${entry.use}，thinking ${entry.thinking}）`).join("；");
+function nextFallback(role: MasterRole, worker: WorkerRef): MasterModelAtom | undefined {
+	const chain: MasterModelAtom[] = [role, ...role.fallback];
+	let index = chain.findIndex((atom) => atom.model === worker.model && atom.thinking === worker.thinking);
+	if (index < 0) index = chain.findIndex((atom) => atom.model === worker.model);
+	return chain[index + 1];
 }
 
-const REVIEW_DISCIPLINE = "审查纪律：默认省略 review；仅高影响或难以窄测证明的重要实现设 review:true，典型边界是安全权限、持久化/迁移、并发/状态机、公共/跨进程接口、构建发布；调查、文档、机械修改、局部低风险修复、纯重构、纯追问均为轻量。review:true 只记录持久义务，不自动开审；义务在 send/中断/失败后保留并阻止 ack，完成且验证通过后显式 review，审查通过或质量裁决停止后消除义务；未挂义务的 idle Worker 仍可补审；拿不准先省略。";
+function rosterText(models: MasterRole[]): string {
+	return models.map((entry) => {
+		const fallback = entry.fallback.length
+			? `，fallback ${entry.fallback.map(modelAtomText).join(" → ")}`
+			: "";
+		return `${entry.role}：${modelAtomText(entry)}（${entry.use}${fallback}）`;
+	}).join("；");
+}
 
-function masterGuidelines(models: MasterModel[]): string[] {
-	return [
-		"subagents 激活时，你是唯一的指挥官（Master），负责委派与最终验收。",
-		`选型表：${rosterText(models)}。start 必须显式传 model 与 thinking；thinking 取表内默认档，仅用户显式指示时偏离。`,
-		"哨兵纪律：以等待为主的盯守（CI、部署、长测试）派最便宜档哨兵票。",
-		"动手边界：指挥官亲手只做三类事——读取与收割、数条命令内可得决定性证据的快速取证、终审 diff 与交付裁决；其余执行与验证一律派票，模型按选型表就任务所需能力选档；dogfood 亦然——执行派票，裁决亲手。",
-		"并行纪律：相互无阻塞边的工作默认并行派发；共享 checkout 时按路径划界，工作说明写明各自触碰的目录。",
-		"工单纪律：项目存在工单库时，派工前按其约定认领，新工单由指挥官决策开立；无工单库则以用户验收为交付边界。",
-		"收割纪律：调查/哨兵票收割要点后立即 kill；实现票保留待收口。",
-		"计划维护纪律：计划产物存在时，其维护责任随指挥权归指挥官。",
-		"投递纪律：子代理结果、中断与审查终态都会自动送达你的回合，无需也不要用 list/tail 轮询进度；tail 只用于按需读取执行细节。",
-		REVIEW_DISCIPLINE,
-		'调用样板：start {"worker":"fix-auth","model":"provider/model","thinking":"medium","prompt":"自包含工作说明"}。',
-	];
+function modelAtomText(atom: Pick<MasterModelAtom, "model" | "thinking">): string {
+	return `${atom.model}/${atom.thinking}`;
 }
 
 function masterEventEnvelope(content: string): string {
@@ -790,8 +957,8 @@ function resumeCheckPrompt(): string {
 	return masterEventEnvelope("上次被外部中断，先核对 git status 与现场再继续，避免重复执行已经发生的副作用。");
 }
 
-function workerInstructions(name: string): string {
-	return `<firecode_worker name="${name}">\n你是指挥官委派的子代理，只完成工作说明。使用现有工具在当前 checkout 内工作，必须自测并报告证据；不得启动子 Agent、git push 或新增依赖。提交只带自己改动的路径。\n</firecode_worker>`;
+function fallbackResumePrompt(from: string, to: string, reason: string): string {
+	return masterEventEnvelope(`供应商故障，已切换 ${from}→${to}（${reason}）。沿用当前会话与原工作说明，从中断处继续，不要重复已经完成的副作用。`);
 }
 
 const ACTION_VERB: Record<string, string> = { start: "启动", list: "查看", kill: "移除", send: "发送", interrupt: "中断", review: "审查", tail: "近况", ack: "待命" };
@@ -800,8 +967,8 @@ function subagentsCallParts(args: Record<string, unknown>): Part[] {
 	const parts: Part[] = [{ text: ACTION_VERB[action] ?? action, bold: true }];
 	const target = optionalString(args.worker);
 	if (target) parts.push({ text: ` ${target}`, color: "accent" });
-	const model = optionalString(args.model);
-	if (action === "start" && model) parts.push({ text: ` · ${model.split("/").pop()}`, color: "muted" });
+	const role = optionalString(args.role);
+	if ((action === "start" || action === "send") && role) parts.push({ text: ` · ${role}`, color: "muted" });
 	const prompt = optionalString(args.prompt)?.split("\n", 1)[0];
 	if (prompt && action === "start") parts.push({ text: ` — ${prompt}`, color: "muted" });
 	return parts;
@@ -809,6 +976,8 @@ function subagentsCallParts(args: Record<string, unknown>): Part[] {
 
 const renderSubagentsResult = makeResultRenderer(false);
 const STATUS_WORD = { working: "工作", idle: "空闲", reviewing: "审查" } satisfies Record<WorkerStatus, string>;
+const SPINNER_FRAMES = [..."⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"];
+const SPINNER_MS = 120;
 
 function reviewProgressFromEntry(entry: unknown): ReviewProgress | undefined {
 	if (!entry || typeof entry !== "object") return undefined;
@@ -881,9 +1050,9 @@ function expandedWorkerList(
 				return new ToolLine({
 					label: String(worker.name),
 					value: [
-						{ text: `${String(worker.model).split("/").pop()}/${String(worker.thinking)}`, color: "muted" },
-						{ text: ` · ${STATUS_WORD[worker.status as WorkerStatus] ?? String(worker.status)}`, color: "accent" },
+						{ text: roleStatusText(worker), color: "accent" },
 						...actionParts,
+						{ text: ` · ${String(worker.model).split("/").pop()}/${String(worker.thinking)}`, color: "muted" },
 					],
 					clip: "end",
 					theme,
@@ -897,24 +1066,51 @@ function listMeta(workers: unknown[]): Part[] {
 	if (!workers.length) return [{ text: " — 池 0", color: "muted" }];
 	return [{ text: ` — 池 ${workers.length}：${workers.map((value) => {
 		const worker = value as Record<string, unknown>;
-		return `${String(worker.name)} ${STATUS_WORD[worker.status as WorkerStatus] ?? String(worker.status)}`;
+		return `${String(worker.name)} ${roleStatusText(worker)}`;
 	}).join(" · ")}`, color: "muted" }];
 }
+/** 角色为主的状态投影：「工程师·工作」；档案缺角色时退到纯状态词。 */
+function roleStatusText(worker: { role?: unknown; status?: unknown }): string {
+	const status = STATUS_WORD[worker.status as WorkerStatus] ?? String(worker.status);
+	return worker.role ? `${String(worker.role)}·${status}` : status;
+}
+/** 有子代理在飞（工作或审查）时底栏活动动画运转，也是动画计时器的唯一起停判据。 */
+export function masterActive(workers: ReadonlyArray<Pick<WorkerRef, "status">>): boolean {
+	return workers.some((worker) => worker.status !== "idle");
+}
 export function masterStatusLine(
-	workers: ReadonlyArray<Pick<WorkerRef, "status">>,
+	workers: ReadonlyArray<Pick<WorkerRef, "status" | "role">>,
 	theme: Pick<ExtensionContext["ui"]["theme"], "fg">,
+	frame = 0,
 ): string {
-	const count = (status: WorkerStatus) => workers.filter((worker) => worker.status === status).length;
-	return `${theme.fg("dim", "👑 指挥官")}${count("working") ? theme.fg("dim", `/工作${count("working")}`) : ""}${count("reviewing") ? theme.fg("dim", `/审${count("reviewing")}`) : ""}${count("idle") ? theme.fg("dim", `/闲${count("idle")}`) : ""}`;
+	if (!workers.length) return theme.fg("dim", "👑 指挥官");
+	const spinner = masterActive(workers) ? `${SPINNER_FRAMES[frame % SPINNER_FRAMES.length]} ` : "";
+	const byRole = new Map<string, number>();
+	let idle = 0;
+	for (const worker of workers) {
+		if (worker.status === "idle") idle += 1;
+		else {
+			const initial = roleInitial(worker.role);
+			byRole.set(initial, (byRole.get(initial) ?? 0) + 1);
+		}
+	}
+	const counts = [...byRole].map(([initial, count]) => `${initial}${count}`);
+	if (idle) counts.push(`闲${idle}`);
+	return theme.fg("dim", `👑 ${spinner}${counts.join("·")}`);
+}
+/** 角色首字（按 code point 取，兼容 emoji 角色名）；无角色时以工作态首字兜底。 */
+function roleInitial(role: string | undefined): string {
+	return [...(role ?? "")][0] ?? STATUS_WORD.working[0]!;
 }
 export function statusText(workers: WorkerRef[]): string {
 	return workers.length
-		? workers.map((worker) => `${worker.name} ${STATUS_WORD[worker.status]} ${worker.model.split("/").pop()}`).join("\n")
+		? workers.map((worker) => `${worker.name} ${roleStatusText(worker)} ${worker.model.split("/").pop()}`).join("\n")
 		: "没有子代理";
 }
 function compactWorker(worker: WorkerRef) {
 	return {
 		name: worker.name,
+		role: worker.role,
 		status: worker.status,
 		model: worker.model,
 		thinking: worker.thinking,

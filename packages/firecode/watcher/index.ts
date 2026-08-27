@@ -63,64 +63,71 @@ export function registerWatcher(
 	const spawnObserver = dependencies.createObserver ?? createObserver;
 	let runtime: WatcherRuntime | undefined;
 	let reviewActive = false;
-	/** 重新入场计数：在途评估看的是旧现场，它的结果与故障都不再算数。 */
-	let era = 0;
 
-	const resetObserver = () => {
-		if (!runtime) return;
-		era += 1;
-		runtime.observer?.dispose();
-		runtime.observer = undefined;
-		runtime.pending = [];
-	};
-	const deactivate = () => {
-		runtime?.observer?.dispose();
-		runtime?.ctx.ui.setStatus("watcher", undefined);
+	const deactivate = (owner = runtime) => {
+		if (!owner || runtime !== owner) return;
 		runtime = undefined;
+		owner.observer?.dispose();
+		owner.observer = undefined;
+		owner.ctx.ui.setStatus("watcher", undefined);
+	};
+	const resetObserver = (owner = runtime) => {
+		if (!owner || runtime !== owner) return;
+		runtime = {
+			ctx: owner.ctx,
+			pending: [],
+			lastTurnIndex: owner.lastTurnIndex,
+			evaluating: false,
+		};
+		owner.observer?.dispose();
+		owner.observer = undefined;
 	};
 	const activate = (ctx: ExtensionContext): WatcherRuntime => {
-		if (runtime) {
-			runtime.ctx = ctx;
-			return runtime;
-		}
-		runtime = { ctx, pending: [], lastTurnIndex: 0, evaluating: false };
+		const owner = { ctx, pending: [], lastTurnIndex: 0, evaluating: false };
+		runtime = owner;
 		ctx.ui.setStatus("watcher", ctx.ui.theme.fg("dim", `👓 ${formatModelName(config.model)}/${config.thinking}`));
-		return runtime;
+		return owner;
 	};
 	// 与指挥官事件同构：忙时卡片经 steer 队列句缝追加，歇透时走前门唤起（见 deliver.ts）。
-	const speak = (active: WatcherRuntime, advice: Advice, turnIndex: number) => {
+	const speak = (owner: WatcherRuntime, advice: Advice, turnIndex: number) => {
 		const card: WatcherCard = { note: advice.note, turnIndex };
-		return deliver(pi, active.ctx, { customType: WATCHER_MESSAGE_TYPE, content: adviceMessage(card), details: card });
+		return deliver(pi, owner.ctx, { customType: WATCHER_MESSAGE_TYPE, content: adviceMessage(card), details: card });
 	};
-	const evaluate = async (active: WatcherRuntime) => {
-		active.evaluating = true;
-		let current = era;
+	const evaluate = async (owner: WatcherRuntime) => {
+		owner.evaluating = true;
 		try {
-			while (runtime === active && active.pending.length && !reviewActive) {
-				current = era;
+			while (runtime === owner && owner.pending.length && !reviewActive) {
 				// 合并跳最新：评估期间到达的回合并进下一批，不排队补评估。
-				const increment = active.pending.splice(0).join("\n");
-				const turnIndex = active.lastTurnIndex;
-				active.observer ??= await spawnObserver({
-					cwd: active.ctx.cwd,
-					model: await (dependencies.resolveModel ?? resolveConfiguredModel)(config.model),
-					thinking: config.thinking,
-					pool,
-				});
-				const advice = await active.observer.evaluate(increment);
-				if (current !== era) continue;
-				if (advice && runtime === active) await speak(active, advice, turnIndex);
+				const increment = owner.pending.splice(0).join("\n");
+				const turnIndex = owner.lastTurnIndex;
+				let observer = owner.observer;
+				if (!observer) {
+					const cwd = owner.ctx.cwd;
+					const model = await (dependencies.resolveModel ?? resolveConfiguredModel)(config.model);
+					if (runtime !== owner) return;
+					observer = await spawnObserver({ cwd, model, thinking: config.thinking, pool });
+					if (runtime !== owner) {
+						observer.dispose();
+						return;
+					}
+					owner.observer = observer;
+				}
+				const advice = await observer.evaluate(increment);
+				if (runtime !== owner) return;
+				if (advice) {
+					await speak(owner, advice, turnIndex);
+					if (runtime !== owner) return;
+				}
 				// 自身上下文快满时也重新入场：观察员只需要当下，不需要完整历史。
-				if ((active.observer?.contextPercent() ?? 0) >= CONTEXT_RESET_PERCENT) resetObserver();
+				if ((observer.contextPercent() ?? 0) >= CONTEXT_RESET_PERCENT) resetObserver(owner);
 			}
 		} catch (error) {
 			// 被重新入场中断的评估不算故障：下一批增量会开一个新观察会话。
-			if (current === era) {
-				active.ctx.ui.notify(`观察员已停止：${error instanceof Error ? error.message : String(error)}`, "warning");
-				deactivate();
-			}
+			if (runtime !== owner) return;
+			owner.ctx.ui.notify(`观察员已停止：${error instanceof Error ? error.message : String(error)}`, "warning");
+			deactivate(owner);
 		} finally {
-			active.evaluating = false;
+			owner.evaluating = false;
 		}
 	};
 
@@ -147,13 +154,12 @@ export function registerWatcher(
 		activate(ctx);
 	});
 
-	pi.on("turn_end", (event, ctx) => {
-		const active = runtime;
-		if (!active) return;
-		active.ctx = ctx;
-		active.pending.push(renderTurn(event, config.context));
-		active.lastTurnIndex = event.turnIndex;
-		if (!active.evaluating && !reviewActive) void evaluate(active);
+	pi.on("turn_end", (event) => {
+		const owner = runtime;
+		if (!owner) return;
+		owner.pending.push(renderTurn(event, config.context));
+		owner.lastTurnIndex = event.turnIndex;
+		if (!owner.evaluating && !reviewActive) void evaluate(owner);
 	});
 
 	// fire-review 活跃期静默：不与对抗审查的反馈打架，增量留着审查完合并评估。

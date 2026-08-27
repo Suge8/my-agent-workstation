@@ -44,17 +44,23 @@ export interface ReviewConfig {
 	language: Language;
 }
 
-/** Master 选型表条目：注入 subagents 工具提示词，供派发时选型。 */
-export interface MasterModel {
-	/** 真实模型 id：provider/model。 */
+/** Master 角色表条目：原子模型已拆成运行时模型与思考档。 */
+export interface MasterModelAtom {
 	model: string;
 	thinking: ThinkingLevelValue;
-	/** 适用场景。 */
+}
+
+export const MASTER_ROLES = ["调研员", "工程师", "全栈", "架构师", "设计师", "哨兵"] as const;
+export type MasterRoleName = (typeof MASTER_ROLES)[number];
+
+export interface MasterRole extends MasterModelAtom {
+	role: MasterRoleName;
 	use: string;
+	fallback: MasterModelAtom[];
 }
 
 export interface MasterConfig {
-	models: MasterModel[];
+	roles: MasterRole[];
 	workerExcludeExtensions: string[];
 	autoActivate: boolean;
 }
@@ -214,7 +220,7 @@ export function loadConfig(): LoadedConfig {
 		reviewProblems.push("review 必须是对象");
 	const review = parseReviewConfig(asRecord(raw.review), reviewProblems);
 	if (raw.review !== undefined || features.review !== false) problems.push(...reviewProblems);
-	// master 同理：花名册错误会拿错模型真实发起 Worker，不能静默当空对象。
+	// master 同理：角色表错误会拿错模型真实发起 Worker，不能静默当空对象。
 	if (raw.master !== undefined && !isPlainObject(raw.master))
 		problems.push("master 必须是对象");
 	const master = parseMasterConfig(asRecord(raw.master), problems);
@@ -351,19 +357,25 @@ function reviewTools(value: unknown, problems: string[]): string[] {
 /** 导出供测试：与 review 节同样严格拒绝未知字段，类型错误记录而非静默回退。 */
 export function parseMasterConfig(raw: Record<string, unknown>, problems: string[]): MasterConfig {
 	for (const key of Object.keys(raw))
-		if (key !== "models" && key !== "workerExcludeExtensions" && key !== "autoActivate")
+		if (key !== "roles" && key !== "workerExcludeExtensions" && key !== "autoActivate")
 			problems.push(`未知字段 master.${key}`);
 	const exclusions = stringArray(raw.workerExcludeExtensions, "master.workerExcludeExtensions", problems);
 	const autoActivate = booleanValue(raw.autoActivate, "master.autoActivate", true, problems);
-	if (raw.models === undefined) return { models: [], workerExcludeExtensions: exclusions, autoActivate };
-	if (!Array.isArray(raw.models) || raw.models.length === 0 || raw.models.length > 8) {
-		problems.push("master.models 必须包含 1–8 个模型");
-		return { models: [], workerExcludeExtensions: exclusions, autoActivate };
+	if (raw.roles === undefined)
+		return { roles: [], workerExcludeExtensions: exclusions, autoActivate };
+	if (!isPlainObject(raw.roles) || Object.keys(raw.roles).length === 0) {
+		problems.push("master.roles 必须是至少包含一个固定角色的对象");
+		return { roles: [], workerExcludeExtensions: exclusions, autoActivate };
 	}
-	const models = raw.models.map((item, index) => masterModel(item, `master.models[${index}]`, problems));
-	if (new Set(models.map((entry) => entry.model)).size !== models.length)
-		problems.push("master.models 模型不能重复");
-	return { models, workerExcludeExtensions: exclusions, autoActivate };
+	const configured = raw.roles;
+	for (const role of Object.keys(configured))
+		if (!MASTER_ROLES.includes(role as MasterRoleName))
+			problems.push(`未知角色 master.roles.${role}，可用：${MASTER_ROLES.join(" / ")}`);
+	const roles = MASTER_ROLES.flatMap((role) =>
+		Object.hasOwn(configured, role)
+			? [masterRole(configured[role], `master.roles.${role}`, role, problems)]
+			: []);
+	return { roles, workerExcludeExtensions: exclusions, autoActivate };
 }
 
 function booleanValue(value: unknown, field: string, fallback: boolean, problems: string[]): boolean {
@@ -382,23 +394,49 @@ function stringArray(value: unknown, field: string, problems: string[]): string[
 	return [...new Set(value)];
 }
 
-function masterModel(value: unknown, field: string, problems: string[]): MasterModel {
+function masterRole(
+	value: unknown,
+	field: string,
+	role: MasterRoleName,
+	problems: string[],
+): MasterRole {
 	const record = asRecord(value);
-	rejectUnknownKeys(record, ["model", "thinking", "use"], field, problems);
-	const model = typeof record.model === "string" && record.model ? record.model : "";
-	if (!model) problems.push(`${field}.model 必须是非空字符串`);
-	let thinking: ThinkingLevelValue = "medium";
-	if (record.thinking !== undefined) {
-		if (typeof record.thinking === "string" && THINKING_LEVELS.has(record.thinking as ThinkingLevelValue))
-			thinking = record.thinking as ThinkingLevelValue;
-		else problems.push(`${field}.thinking 值无效`);
+	rejectUnknownKeys(record, ["model", "use", "fallback"], field, problems);
+	const atom = masterModelAtom(record.model, `${field}.model`, problems);
+	const use = typeof record.use === "string" && record.use ? record.use : "";
+	if (!use) problems.push(`${field}.use 必须是非空字符串`);
+	const fallback = masterFallback(record.fallback, `${field}.fallback`, problems);
+	return { role, ...atom, use, fallback };
+}
+
+function masterFallback(value: unknown, field: string, problems: string[]): MasterModelAtom[] {
+	if (value === undefined) return [];
+	if (!Array.isArray(value) || value.length > 2) {
+		problems.push(`${field} 必须是至多 2 项的数组`);
+		return [];
 	}
-	let use = "通用";
-	if (record.use !== undefined) {
-		if (typeof record.use === "string" && record.use) use = record.use;
-		else problems.push(`${field}.use 必须是非空字符串`);
+	return value.map((item, index) => masterModelAtom(item, `${field}[${index}]`, problems));
+}
+
+function masterModelAtom(value: unknown, field: string, problems: string[]): MasterModelAtom {
+	if (typeof value !== "string" || !value) {
+		problems.push(`${field} 必须是“供应商/模型/思考档”字符串`);
+		return { model: "", thinking: "medium" };
 	}
-	return { model, thinking, use };
+	const slash = value.lastIndexOf("/");
+	const model = slash > 0 ? value.slice(0, slash) : "";
+	const thinking = slash > 0 ? value.slice(slash + 1) : value;
+	if (!THINKING_LEVELS.has(thinking as ThinkingLevelValue))
+		problems.push(`${field} 思考档无效：${thinking}`);
+	const providerSlash = model.indexOf("/");
+	if (providerSlash <= 0 || providerSlash === model.length - 1)
+		problems.push(`${field} 模型无效：必须是 provider/model`);
+	return {
+		model,
+		thinking: THINKING_LEVELS.has(thinking as ThinkingLevelValue)
+			? thinking as ThinkingLevelValue
+			: "medium",
+	};
 }
 
 // ---- watcher 节 ----

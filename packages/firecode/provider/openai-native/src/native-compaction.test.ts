@@ -53,7 +53,7 @@ type CompactClientResult =
 	  }
 	| {
 			ok: false;
-			reason: "network-error" | "non-2xx";
+			reason: "network-error" | "non-2xx" | "input-too-large" | "response-failed";
 			status?: number;
 			detail?: string;
 	  };
@@ -1015,6 +1015,41 @@ test("native replay runs before configured Responses options", async () => {
 	]);
 	expect(rewritten.text).toEqual({ verbosity: "high" });
 	expect(rewritten.service_tier).toBe("priority");
+});
+
+test("an over-window native compaction reports its full terminal failure without falling back", async () => {
+	const detail = "estimated input exceeds the model context window (120001 input + 128000 output reserve > 200000 tokens)";
+	const { sessionBeforeCompact, compactCalls } = await loadHookHarness({
+		compactResult: { ok: false, reason: "input-too-large", detail },
+	});
+	const user = createUserEntry("over_window_user", "Keep the complete context.");
+	const notifications: Array<[string, string]> = [];
+	const result = await sessionBeforeCompact(
+		{
+			branchEntries: [user],
+			signal: new AbortController().signal,
+			preparation: {
+				tokensBefore: 200001,
+				firstKeptEntryId: user.id,
+				previousSummary: undefined,
+				messagesToSummarize: [toReplayMessage(user)],
+				turnPrefixMessages: [],
+			},
+		},
+		{
+			...createContext({ branchEntries: [user] }),
+			hasUI: true,
+			ui: {
+				notify: (message: string, type: string) => notifications.push([message, type]),
+			},
+		},
+	);
+
+	expect(result).toEqual({ cancel: true });
+	expect(compactCalls).toHaveLength(1);
+	expect(notifications).toEqual([
+		[`pi-openai-native: native compaction failed: input-too-large: ${detail}.`, "error"],
+	]);
 });
 
 test("an eligible native compaction failure cancels instead of silently falling back", async () => {
