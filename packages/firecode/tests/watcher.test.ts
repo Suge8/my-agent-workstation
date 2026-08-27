@@ -13,7 +13,7 @@ import {
 
 const { fauxAssistantMessage, fauxToolCall, registerFauxProvider } = await import(PI_AI_COMPAT_URL) as any;
 const { visibleWidth } = await import(PI_TUI_URL) as { visibleWidth: (text: string) => number };
-const WATCHER_CONFIG = { model: "test/watcher", thinking: "low" };
+const WATCHER_CONFIG = { model: "test/watcher/low" };
 const QUEUE_OPTIONS = { deliverAs: "steer" };
 const savedAgentDir = process.env.PI_CODING_AGENT_DIR;
 
@@ -205,7 +205,7 @@ test("watcher 节缺失时拒绝启动并说明原因，不拿默认模型代替
 	expect(faux.getPendingResponseCount()).toBe(0);
 
 	await harness.command("");
-	expect(harness.notices.join("\n")).toContain("watcher.model 必须显式配置");
+	expect(harness.notices.join("\n")).toContain("watcher.model 必须是“provider/model/thinking”字符串");
 });
 
 test("无建议时保持沉默；增量带上工具调用与工具结果，minimal 只省推理与正文", async () => {

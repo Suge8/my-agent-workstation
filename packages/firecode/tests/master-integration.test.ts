@@ -178,7 +178,9 @@ test("角色表、原子与 fallback 配置错误时拒绝启动", async () => {
 	});
 	expect(harness.notices.join("\n")).toContain("Master 配置有问题，已停止");
 	expect(harness.notices.join("\n")).toContain("未知字段 master.roles.工程师.thinking");
-	expect(harness.notices.join("\n")).toContain("master.roles.工程师.model 模型无效");
+	expect(harness.notices.join("\n")).toContain(
+		"master.roles.工程师.model 必须是“provider/model/thinking”字符串（模型段不是 provider/model：invalid）",
+	);
 	expect(harness.notices.join("\n")).toContain("master.roles.工程师.fallback 必须是至多 2 项的数组");
 	await expect(harness.list()).rejects.toThrow("只在 Master 中可用");
 });

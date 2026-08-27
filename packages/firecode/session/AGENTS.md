@@ -4,12 +4,15 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `presets.ts` | 预设切换：模型、思考等级、工具集、附加指令 |
+| `presets.ts` | 预设切换：模型原子、工具集、附加指令 |
 | `rename.ts` | `/rename` 与 `keys.rename` 改会话名 |
 | `herdr-display.ts` | 会话身份投影到 herdr 的 agent 副标题 |
 | `stats.ts` | `/tokens` 扫会话 jsonl 统计 token 与成本（源自 pi-token-stats, MIT） |
 | `bark.ts` | 任务落定时推 iPhone Bark 通知 |
 | `working-flame.ts` | 工作回合内 aboveEditor 居中多行火焰 widget |
+
+预设的 `model` 是模型原子（`provider/model/thinking`），模型与思考档一起切换：模型切换失败时思考档也不动。
+调 Pi 接口前才把 provider 与模型名拆开。
 
 预设名写入会话记录，重开会话只恢复名字与附加指令，不重放模型和工具切换。
 

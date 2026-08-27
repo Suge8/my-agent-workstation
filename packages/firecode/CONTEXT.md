@@ -124,10 +124,14 @@ _避免使用_：收尾报告、总结卡（卡另指结果卡）
 当前 Pi Agent 安装拥有的 FireCode 私人配置，是运行行为的唯一事实源；由安装流程生成，不随源码发行。
 _避免使用_：源码配置、默认配置
 
+**模型原子（Model Atom）**：
+配置里指定模型与思考档的唯一写法：`"provider/model/thinking"` 字符串，按最后一个斜杠切出思考档，前半是 provider/model。presets、review 的顾问与审查者、master 角色表的主模型与 fallback、watcher 全用它，解析后统一得到运行时模型 id 与思考档。
+_避免使用_：模型 ID（不含思考档）、模型对、`{ model, thinking }` 对象
+
 **配置模板（Configuration Template）**：
 可公开解析的运行配置起始样例；复制并按安装环境补全后才成为运行配置，本身不参与运行。
 _避免使用_：运行配置、默认配置
 
 **角色表（Role Roster）**：
-config.jsonc 的 `master.roles` 对象：键只能取六个固定角色，可配置其中任意非空子集；每个已配置角色绑定一个 `provider/model/thinking` 主原子、适用场景与可选 fallback 链，并注入指挥官提示词。同一模型可供多个角色复用。
+config.jsonc 的 `master.roles` 对象：键只能取六个固定角色，可配置其中任意非空子集；每个已配置角色绑定一个主模型原子、适用场景与可选 fallback 链，并注入指挥官提示词。同一模型可供多个角色复用。
 _避免使用_：选型表、花名册、模型清单

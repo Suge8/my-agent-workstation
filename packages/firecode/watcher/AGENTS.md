@@ -38,7 +38,7 @@ compaction、会话切换或观察会话自身上下文超过阈值时，丢弃�
 
 ## 配置
 
-`watcher` 节：`enabled`（默认 true，新会话自动激活）、`model` 与 `thinking`（必须显式配置）、`context`
+`watcher` 节：`enabled`（默认 true，新会话自动激活）、`model`（必须显式配置的模型原子，含思考档）、`context`
 （默认 `minimal`）。节缺失、字段缺失、未知字段、类型错误，以及 `features.watcher` 开关本身写错（字符串
 `"false"` 会因 `!== false` 静默启用）都算配置问题：观察员拒绝启动并在 `session_start` 警告一次，
 绝不回退默认模型。模型必须能在内置 provider 解析——扩展注册的 provider（如 antigravity）在

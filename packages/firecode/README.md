@@ -27,7 +27,7 @@ curl -fsSL https://raw.githubusercontent.com/Suge8/firecode/v0.6.1/config.exampl
   -o "$agent_dir/extensions/firecode/config.jsonc"
 ```
 
-公开模板提供维护者当前的完整推荐配置：除 Bark 外功能全开，Master 与 Watcher 在新会话自动激活。Watcher 会在每个主会话回合后调用模型，OpenAI priority 会按供应商规则加价；复制前应确认列出的模型均已认证并接受额外费用。审查与观察员的模型必须显式写入运行配置，否则对应功能拒绝启动。缺少运行配置时，FireCode 会关闭可选功能并在会话启动时警告；配置模板本身不会被运行时读取。
+公开模板提供维护者当前的完整推荐配置：除 Bark 外功能全开，Master 与 Watcher 在新会话自动激活。Watcher 会在每个主会话回合后调用模型，OpenAI priority 会按供应商规则加价；复制前应确认列出的模型均已认证并接受额外费用。配置里指定模型一律写 `"provider/model/thinking"`；审查与观察员的模型必须显式写入运行配置，否则对应功能拒绝启动。缺少运行配置时，FireCode 会关闭可选功能并在会话启动时警告；配置模板本身不会被运行时读取。
 
 ## 开发
 

@@ -46,7 +46,7 @@ pi install npm:pi-antigravity
 
 告诉读者：启动 `pi`，执行 `/login`，至少完成一个供应商的认证；作者的样板用到 `openai-codex`、`anthropic`、`xai`、`deepseek`、`kimi-coding`、`antigravity`。
 
-登录完成后运行 `pi --list-models`，这份输出是后续所有模型字段的唯一可选集——步骤 4、5 只能填出现在这里的 `provider/model`。
+登录完成后运行 `pi --list-models`，这份输出是后续模型的唯一可选集——步骤 4、5 使用的 `provider/model` 必须出现在这里；FireCode 配置再在末尾加一段思考档，组成 `provider/model/thinking`。
 
 **完成标准**：`pi --list-models` 至少列出一个模型。
 
@@ -88,11 +88,11 @@ cp <repo>/packages/firecode/config.example.jsonc ~/.pi/agent/extensions/firecode
 
 基底里 features 已全开、keys 与 `openai` 段直接可用，作者的立场是愿意用就用原样。三个 feature 有前置条件，读者未满足时置为 `false`：`claudeSub` 要求已登录 `anthropic`；`openaiNative` 要求已登录 `openai-codex` 或 `xai`；`bark` 基底里就是 `false`，步骤 10 配了 Bark 地址后才改为 `true`。
 
-**陷阱：模型字段有三种写法。** `presets` 把 provider、model 和 thinking 档拆成 `provider`、`model`、`thinkingLevel` 三个独立字段；`review` 与 `watcher` 用两段式 `"provider/model"` 字符串，thinking 档在同级的 `thinking` 字段里；`master.roles` 用三段式 `"provider/model/thinking"` 字符串，thinking 档并在字符串结尾、没有独立字段。写混了 FireCode 认不出模型。
+**写法：模型字段统一写模型原子。** 每个值都是单个 `"provider/model/thinking"` 字符串，思考档在最后一段。这一写法用于 `presets` 的 `model`、`review` 的 `advisor` 与 `reviewers`、`master.roles` 的 `model` 与 `fallback`，以及 `watcher` 的 `model`。
 
-**陷阱：`master.roles` 是角色名到模型的映射。** 六个角色名是固定集合，照基底原样保留、只换每个值里的模型。每个值含三段式 `model` 与一句 `use`——`use` 是指挥官选角色的依据，照基底写法给出强项与代价；可选的 `fallback` 是至多两条备选模型的数组，写法与 `model` 相同。
+**陷阱：`master.roles` 是角色名到模型的映射。** 六个角色名是固定集合，照基底原样保留、只换每个值里的模型。每个值含一个模型原子 `model` 与一句 `use`——`use` 是指挥官选角色的依据，照基底写法给出强项与代价；可选的 `fallback` 是至多两个模型原子的数组。
 
-替换范围就这些：`presets` 按步骤 4 的表绑定 `alt+1` 到 `alt+7`，别名自取、thinking 档沿用基底；`watcher` 换成步骤 4 的观察员模型；`master.roles` 六个角色逐个换成读者已登录的模型，含各自的 `fallback`；`review` 只改 advisor 与 reviewers，其余字段沿用基底值。
+替换范围就这些：所有模型原子的思考档沿用基底，只替换前两段 `provider/model`；`presets` 按步骤 4 的表绑定 `alt+1` 到 `alt+7`，别名自取；`watcher` 换成步骤 4 的观察员模型；`master.roles` 六个角色逐个换成读者已登录的模型，含各自的 `fallback`；`review` 只改 `advisor` 与 `reviewers`，其余字段沿用基底值。
 
 **完成标准**：下面这条命令裸退出码为 0（`config.jsonc` 去掉注释后按 JSON 校验）——
 

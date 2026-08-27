@@ -44,7 +44,11 @@ pi 的个人定制层：启动横幅、底部状态栏、工具行渲染、预�
 `extensions/firecode/config.jsonc`；安装流程当场生成完整私人配置。公开的 `config.example.jsonc` 是维护者当前的
 完整推荐配置：除 Bark 外功能全开，Master 与 Watcher 在新会话自动激活；Watcher 每回合调用模型，priority 按
 供应商规则加价。配置模板只是起始样例，不参与运行时读取。缺失运行配置时关闭可选功能，并在每次
-`session_start` 警告一次；运行中补上配置也需重启 Pi 才生效。
+`session_start` 警告一次；运行中补上配置也需重启 Pi 才生效。改完本机运行配置后，把其中属于推荐配置的部分
+同步进 `config.example.jsonc`，个人化内容（自定义 instructions、私人扩展名）留在本机。
+
+配置里凡是指定模型的位置都写同一个模型原子 `"provider/model/thinking"`（presets、review、master.roles、
+watcher），解析在 `config.ts` 的 `parseModelAtom` 一处收口；旧的分字段与两段式写法一律报配置问题。
 
 不要新建 keys.json，也不要读项目级配置。快捷键启动时绑定，改完需重启；`ctrl+f` 只改 `openai` 节，其它注释
 保留。未知字段、嵌套未知字段与类型错误都报配置问题；`review`、`master` 与 `watcher` 节有问题时对应功能

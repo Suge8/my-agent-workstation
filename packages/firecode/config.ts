@@ -14,25 +14,27 @@ export type ThinkingLevelValue =
 	| "xhigh"
 	| "max";
 
+/**
+ * 模型原子：配置里一律写作 "provider/model/thinking"，解析后拆成运行时模型 id 与思考档。
+ * 全仓库指定模型与思考档的唯一形状。
+ */
+export interface ModelAtom {
+	model: string;
+	thinking: ThinkingLevelValue;
+}
+
 export interface Preset {
-	provider?: string;
-	model?: string;
-	thinkingLevel?: ThinkingLevelValue;
+	model?: ModelAtom;
 	tools?: string[];
 	instructions?: string;
 	/** 一键切换，如 alt+1；不填则无快捷键 */
 	key?: string;
 }
 
-export interface ReviewModel {
-	model: string;
-	thinking: ThinkingLevelValue;
-}
-
 /** /fire-review 配置：审查者 / 顾问模型 + 循环限制。见 config.jsonc 的 review 节注释。 */
 export interface ReviewConfig {
-	advisor: ReviewModel;
-	reviewers: ReviewModel[];
+	advisor: ModelAtom;
+	reviewers: ModelAtom[];
 	/** 审查轮数硬上限。 */
 	maxRounds: number;
 	/** 连续几轮失败触发顾问仲裁。 */
@@ -44,19 +46,13 @@ export interface ReviewConfig {
 	language: Language;
 }
 
-/** Master 角色表条目：原子模型已拆成运行时模型与思考档。 */
-export interface MasterModelAtom {
-	model: string;
-	thinking: ThinkingLevelValue;
-}
-
 export const MASTER_ROLES = ["调研员", "工程师", "全栈", "架构师", "设计师", "哨兵"] as const;
 export type MasterRoleName = (typeof MASTER_ROLES)[number];
 
-export interface MasterRole extends MasterModelAtom {
+export interface MasterRole extends ModelAtom {
 	role: MasterRoleName;
 	use: string;
-	fallback: MasterModelAtom[];
+	fallback: ModelAtom[];
 }
 
 export interface MasterConfig {
@@ -68,11 +64,9 @@ export interface MasterConfig {
 /** 观察员喂给观察会话的增量粒度：minimal 省略 reasoning 与 diff 正文。 */
 export type WatcherContext = "minimal" | "full";
 
-/** Watcher 观察员配置：模型与 thinking 必须显式配置，绝不回退默认模型。 */
-export interface WatcherConfig {
+/** Watcher 观察员配置：模型原子必须显式配置，绝不回退默认模型。 */
+export interface WatcherConfig extends ModelAtom {
 	enabled: boolean;
-	model: string;
-	thinking: ThinkingLevelValue;
 	context: WatcherContext;
 }
 
@@ -153,6 +147,39 @@ function asRecord(value: unknown): Record<string, unknown> {
 		: {};
 }
 
+/** 嵌套对象也做键白名单：拼写错误必须报出来，不能静默回退默认值。 */
+function rejectUnknownKeys(
+	record: Record<string, unknown>,
+	allowed: readonly string[],
+	field: string,
+	problems: string[],
+) {
+	for (const key of Object.keys(record))
+		if (!allowed.includes(key)) problems.push(`未知字段 ${field}.${key}`);
+}
+
+function booleanValue(value: unknown, field: string, fallback: boolean, problems: string[]): boolean {
+	if (value === undefined) return fallback;
+	if (typeof value === "boolean") return value;
+	problems.push(`${field} 必须是 true 或 false`);
+	return fallback;
+}
+
+function stringValue(value: unknown, field: string, problems: string[]): string | undefined {
+	if (typeof value === "string" && value) return value;
+	problems.push(`${field} 必须是非空字符串`);
+	return undefined;
+}
+
+function stringArray(value: unknown, field: string, problems: string[]): string[] {
+	if (value === undefined) return [];
+	if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !item)) {
+		problems.push(`${field} 必须是非空字符串数组`);
+		return [];
+	}
+	return [...new Set(value)];
+}
+
 function checkFeatures(features: Record<string, unknown>, problems: string[]): void {
 	for (const [key, value] of Object.entries(features)) {
 		if (!FEATURES.includes(key as Feature)) {
@@ -205,7 +232,7 @@ export function loadConfig(): LoadedConfig {
 		? Object.fromEntries(FEATURES.map((feature) => [feature, false]))
 		: asRecord(raw.features);
 	const rawKeys = asRecord(raw.keys);
-	const presets = asRecord(raw.presets) as Record<string, Preset>;
+	const presets = parsePresets(raw.presets, problems);
 	const keys: FireCodeKeys = {
 		rename: typeof rawKeys.rename === "string" ? rawKeys.rename : DEFAULT_KEYS.rename,
 		cyclePreset:
@@ -235,6 +262,77 @@ export function loadConfig(): LoadedConfig {
 	return cached;
 }
 
+// ---- 模型原子 ----
+
+const THINKING_LEVELS = new Set<ThinkingLevelValue>([
+	"off",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+	"max",
+]);
+const FALLBACK_THINKING: ThinkingLevelValue = "medium";
+
+/**
+ * 解析 "provider/model/thinking"：按最后一个斜杠切出思考档，前半必须仍是 provider/model。
+ * 任何位置的模型配置都走这里，解析失败只记录问题并留空模型，让上层拒绝启动。
+ * 每个字段只报一条问题，且必带目标形状——两段式旧写法会同时踩中两项校验，逐项报错说不出该改成什么。
+ */
+export function parseModelAtom(value: unknown, field: string, problems: string[]): ModelAtom {
+	const shape = `${field} 必须是“provider/model/thinking”字符串`;
+	if (typeof value !== "string" || !value) {
+		problems.push(shape);
+		return { model: "", thinking: FALLBACK_THINKING };
+	}
+	const slash = value.lastIndexOf("/");
+	const model = slash > 0 ? value.slice(0, slash) : "";
+	const thinking = slash > 0 ? value.slice(slash + 1) : value;
+	const providerSlash = model.indexOf("/");
+	const valid = THINKING_LEVELS.has(thinking as ThinkingLevelValue);
+	const faults: string[] = [];
+	if (providerSlash <= 0 || providerSlash === model.length - 1)
+		faults.push(`模型段不是 provider/model：${model || value}`);
+	if (!valid) faults.push(`思考档无效：${thinking}`);
+	if (faults.length) problems.push(`${shape}（${faults.join("；")}）`);
+	return { model, thinking: valid ? (thinking as ThinkingLevelValue) : FALLBACK_THINKING };
+}
+
+// ---- presets 节 ----
+
+const PRESET_KEYS = ["model", "tools", "instructions", "key"] as const;
+
+function parsePresets(value: unknown, problems: string[]): Record<string, Preset> {
+	if (value === undefined) return {};
+	if (!isPlainObject(value)) {
+		problems.push("presets 必须是对象");
+		return {};
+	}
+	return Object.fromEntries(
+		Object.entries(value).map(([name, raw]) => [name, parsePreset(raw, `presets.${name}`, problems)]),
+	);
+}
+
+/** preset 只在写了 model 时切模型；其余字段与模型原子互不依赖。 */
+function parsePreset(value: unknown, field: string, problems: string[]): Preset {
+	if (!isPlainObject(value)) {
+		problems.push(`${field} 必须是对象`);
+		return {};
+	}
+	rejectUnknownKeys(value, PRESET_KEYS, field, problems);
+	return {
+		...(value.model === undefined
+			? {}
+			: { model: parseModelAtom(value.model, `${field}.model`, problems) }),
+		...(value.tools === undefined ? {} : { tools: stringArray(value.tools, `${field}.tools`, problems) }),
+		...(value.instructions === undefined
+			? {}
+			: { instructions: stringValue(value.instructions, `${field}.instructions`, problems) }),
+		...(value.key === undefined ? {} : { key: stringValue(value.key, `${field}.key`, problems) }),
+	};
+}
+
 // ---- review 节 ----
 
 const REVIEW_KEYS = new Set([
@@ -247,16 +345,6 @@ const REVIEW_KEYS = new Set([
 	"language",
 ]);
 const DEFAULT_TOOLS = ["read", "grep", "find", "ls", "bash"];
-const EMPTY_REVIEW_MODEL: ReviewModel = { model: "", thinking: "medium" };
-const THINKING_LEVELS = new Set<ThinkingLevelValue>([
-	"off",
-	"minimal",
-	"low",
-	"medium",
-	"high",
-	"xhigh",
-	"max",
-]);
 const LANGUAGES = new Set<Language>(["zh", "en"]);
 
 /** 导出供测试：严格拒绝未知字段（含嵌套），类型错误一律记录而非静默回退。 */
@@ -267,9 +355,11 @@ export function parseReviewConfig(raw: Record<string, unknown>, problems: string
 			? "review.background 已随审查子进程层删除，请直接移除该键"
 			: `未知字段 review.${key}`);
 	}
+	// advisor 与 reviewers 缺失由模型原子解析自己报形状，不再叠一条泛化的“必须显式配置”。
 	for (const key of REVIEW_KEYS)
-		if (!(key in raw)) problems.push(`review.${key} 必须显式配置`);
-	const advisor = reviewModel(raw.advisor, "review.advisor", EMPTY_REVIEW_MODEL, problems);
+		if (key !== "advisor" && key !== "reviewers" && !(key in raw))
+			problems.push(`review.${key} 必须显式配置`);
+	const advisor = parseModelAtom(raw.advisor, "review.advisor", problems);
 	const reviewers = reviewModels(raw.reviewers, problems);
 	return {
 		advisor,
@@ -282,46 +372,12 @@ export function parseReviewConfig(raw: Record<string, unknown>, problems: string
 	};
 }
 
-/** 嵌套对象也做键白名单：拼写错误必须报出来，不能静默回退默认值。 */
-function rejectUnknownKeys(
-	record: Record<string, unknown>,
-	allowed: readonly string[],
-	field: string,
-	problems: string[],
-) {
-	for (const key of Object.keys(record))
-		if (!allowed.includes(key)) problems.push(`未知字段 ${field}.${key}`);
-}
-
-function reviewModel(
-	value: unknown,
-	field: string,
-	fallback: ReviewModel,
-	problems: string[],
-): ReviewModel {
-	if (value === undefined) return fallback;
-	const record = asRecord(value);
-	rejectUnknownKeys(record, ["model", "thinking"], field, problems);
-	if (!record.model || typeof record.model !== "string") {
-		problems.push(`${field}.model 必须是非空字符串`);
-		return fallback;
-	}
-	const thinking =
-		typeof record.thinking === "string" && THINKING_LEVELS.has(record.thinking as ThinkingLevelValue)
-			? (record.thinking as ThinkingLevelValue)
-			: fallback.thinking;
-	if (thinking !== record.thinking) problems.push(`${field}.thinking 值无效`);
-	return { model: record.model, thinking };
-}
-
-function reviewModels(value: unknown, problems: string[]): ReviewModel[] {
+function reviewModels(value: unknown, problems: string[]): ModelAtom[] {
 	if (!Array.isArray(value) || value.length === 0 || value.length > 5) {
-		if (value !== undefined) problems.push("review.reviewers 必须包含 1–5 个模型");
+		problems.push("review.reviewers 必须包含 1–5 个模型原子");
 		return [];
 	}
-	return value.map((item, index) =>
-		reviewModel(item, `review.reviewers[${index}]`, EMPTY_REVIEW_MODEL, problems),
-	);
+	return value.map((item, index) => parseModelAtom(item, `review.reviewers[${index}]`, problems));
 }
 
 function reviewInt(
@@ -378,22 +434,6 @@ export function parseMasterConfig(raw: Record<string, unknown>, problems: string
 	return { roles, workerExcludeExtensions: exclusions, autoActivate };
 }
 
-function booleanValue(value: unknown, field: string, fallback: boolean, problems: string[]): boolean {
-	if (value === undefined) return fallback;
-	if (typeof value === "boolean") return value;
-	problems.push(`${field} 必须是 true 或 false`);
-	return fallback;
-}
-
-function stringArray(value: unknown, field: string, problems: string[]): string[] {
-	if (value === undefined) return [];
-	if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !item)) {
-		problems.push(`${field} 必须是非空字符串数组`);
-		return [];
-	}
-	return [...new Set(value)];
-}
-
 function masterRole(
 	value: unknown,
 	field: string,
@@ -402,66 +442,40 @@ function masterRole(
 ): MasterRole {
 	const record = asRecord(value);
 	rejectUnknownKeys(record, ["model", "use", "fallback"], field, problems);
-	const atom = masterModelAtom(record.model, `${field}.model`, problems);
+	const atom = parseModelAtom(record.model, `${field}.model`, problems);
 	const use = typeof record.use === "string" && record.use ? record.use : "";
 	if (!use) problems.push(`${field}.use 必须是非空字符串`);
 	const fallback = masterFallback(record.fallback, `${field}.fallback`, problems);
 	return { role, ...atom, use, fallback };
 }
 
-function masterFallback(value: unknown, field: string, problems: string[]): MasterModelAtom[] {
+function masterFallback(value: unknown, field: string, problems: string[]): ModelAtom[] {
 	if (value === undefined) return [];
 	if (!Array.isArray(value) || value.length > 2) {
 		problems.push(`${field} 必须是至多 2 项的数组`);
 		return [];
 	}
-	return value.map((item, index) => masterModelAtom(item, `${field}[${index}]`, problems));
-}
-
-function masterModelAtom(value: unknown, field: string, problems: string[]): MasterModelAtom {
-	if (typeof value !== "string" || !value) {
-		problems.push(`${field} 必须是“供应商/模型/思考档”字符串`);
-		return { model: "", thinking: "medium" };
-	}
-	const slash = value.lastIndexOf("/");
-	const model = slash > 0 ? value.slice(0, slash) : "";
-	const thinking = slash > 0 ? value.slice(slash + 1) : value;
-	if (!THINKING_LEVELS.has(thinking as ThinkingLevelValue))
-		problems.push(`${field} 思考档无效：${thinking}`);
-	const providerSlash = model.indexOf("/");
-	if (providerSlash <= 0 || providerSlash === model.length - 1)
-		problems.push(`${field} 模型无效：必须是 provider/model`);
-	return {
-		model,
-		thinking: THINKING_LEVELS.has(thinking as ThinkingLevelValue)
-			? thinking as ThinkingLevelValue
-			: "medium",
-	};
+	return value.map((item, index) => parseModelAtom(item, `${field}[${index}]`, problems));
 }
 
 // ---- watcher 节 ----
 
-const WATCHER_KEYS = ["enabled", "model", "thinking", "context"] as const;
+const WATCHER_KEYS = ["enabled", "model", "context"] as const;
 const WATCHER_CONTEXTS = new Set<WatcherContext>(["minimal", "full"]);
 
-/** 导出供测试：model/thinking 必填，enabled 默认 true、context 默认 minimal。 */
+/** 导出供测试：model 必填（含思考档），enabled 默认 true、context 默认 minimal。 */
 export function parseWatcherConfig(raw: Record<string, unknown>, problems: string[]): WatcherConfig {
 	rejectUnknownKeys(raw, WATCHER_KEYS, "watcher", problems);
 	const enabled = booleanValue(raw.enabled, "watcher.enabled", true, problems);
-	const model = typeof raw.model === "string" && raw.model ? raw.model : "";
-	if (!model) problems.push("watcher.model 必须显式配置为非空字符串");
-	let thinking: ThinkingLevelValue | undefined;
-	if (raw.thinking === undefined) problems.push("watcher.thinking 必须显式配置");
-	else if (typeof raw.thinking === "string" && THINKING_LEVELS.has(raw.thinking as ThinkingLevelValue))
-		thinking = raw.thinking as ThinkingLevelValue;
-	else problems.push("watcher.thinking 值无效");
+	// 模型原子必填：缺失或写错时留空模型并记录问题，观察员据此拒绝启动。
+	const atom = parseModelAtom(raw.model, "watcher.model", problems);
 	let context: WatcherContext = "minimal";
 	if (raw.context !== undefined) {
 		if (typeof raw.context === "string" && WATCHER_CONTEXTS.has(raw.context as WatcherContext))
 			context = raw.context as WatcherContext;
 		else problems.push("watcher.context 必须是 minimal 或 full");
 	}
-	return { enabled, model, thinking: thinking ?? "low", context };
+	return { enabled, ...atom, context };
 }
 
 function reviewLanguage(value: unknown, problems: string[]): Language {

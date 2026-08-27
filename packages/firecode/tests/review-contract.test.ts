@@ -392,22 +392,22 @@ describe("FAIL output contract", () => {
 });
 
 describe("review config strictness", () => {
-	test("reports unknown keys and type errors instead of silently defaulting", async () => {
+	test("旧的 { model, thinking } 写法与未知键都被报出，而不是静默回退", async () => {
 		const { parseReviewConfig } = (await loadFirecodeModule("config.js")) as {
 			parseReviewConfig: (raw: Record<string, unknown>, problems: string[]) => { tools: string[] };
 		};
 		const problems: string[] = [];
 		parseReviewConfig(
 			{
-				advisor: { model: "p/m", thinkig: "max" },
-				reviewers: [{ model: "p/r", thinking: "high", extra: 1 }],
+				advisor: { model: "p/m", thinking: "max" },
+				reviewers: [{ model: "p/r", thinking: "high" }],
 				background: { cmd: "pi" },
 				tools: "read",
 			},
 			problems,
 		);
-		expect(problems).toContain("未知字段 review.advisor.thinkig");
-		expect(problems).toContain("未知字段 review.reviewers[0].extra");
+		expect(problems).toContain("review.advisor 必须是“provider/model/thinking”字符串");
+		expect(problems).toContain("review.reviewers[0] 必须是“provider/model/thinking”字符串");
 		expect(problems).toContain("review.background 已随审查子进程层删除，请直接移除该键");
 		expect(problems).toContain("review.tools 必须是字符串数组");
 	});
@@ -419,8 +419,8 @@ describe("review config strictness", () => {
 		const problems: string[] = [];
 		parseReviewConfig(
 			{
-				advisor: { model: "p/a", thinking: "max" },
-				reviewers: [{ model: "p/r", thinking: "high" }],
+				advisor: "p/a/max",
+				reviewers: ["p/r/high"],
 				maxRounds: 5,
 				advisorAfterFailures: 2,
 				timeoutMinutes: 20,
@@ -439,8 +439,8 @@ describe("review config strictness", () => {
 		const problems: string[] = [];
 		parseReviewConfig(
 			{
-				advisor: { model: "p/a", thinking: "max" },
-				reviewers: [{ model: "p/r", thinking: "high" }],
+				advisor: "p/a/max",
+				reviewers: ["p/r/high"],
 				maxRounds: 5,
 				advisorAfterFailures: 2,
 				timeoutMinutes: 20,
@@ -470,12 +470,12 @@ describe("review section top-level type", () => {
 			configJsonc: `{ "review": { "maxRounds": 3 } }`,
 		})) as { loadConfig: () => { problems: string[] } };
 		expect(module.loadConfig().problems.filter((item) => item.startsWith("review"))).toEqual([
-			"review.advisor 必须显式配置",
-			"review.reviewers 必须显式配置",
 			"review.advisorAfterFailures 必须显式配置",
 			"review.timeoutMinutes 必须显式配置",
 			"review.tools 必须显式配置",
 			"review.language 必须显式配置",
+			"review.advisor 必须是“provider/model/thinking”字符串",
+			"review.reviewers 必须包含 1–5 个模型原子",
 		]);
 	});
 });

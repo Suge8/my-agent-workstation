@@ -70,7 +70,7 @@ needs_fix 相无渲染机会）；等待模型时编辑器完全隐藏并禁止�
 审查者的只读是契约而非能力边界：排除 write/edit 只挡住这两个工具，保留的 `bash` 仍能在项目目录执行任意
 命令。保留 bash 是有意的——审查者要跑测试取证；真需要物理隔离得上容器或只读挂载。
 
-config.jsonc 的 `review` 节必须显式完整配置：审查者/顾问模型、maxRounds、advisorAfterFailures、
+config.jsonc 的 `review` 节必须显式完整配置：审查者/顾问模型原子（`provider/model/thinking`）、maxRounds、advisorAfterFailures、
 timeoutMinutes、tools、language；公开包不内置依赖个人认证或偏好的模型。缺节、缺字段、解析失败
 或该节有任何配置问题时，`/fire-review` 与 checkpoint 恢复都拒绝启动；活动 checkpoint 保持原样，修好配置并
 重启后继续恢复——静默回退模型会拿用户没配的模型真实发起调用。

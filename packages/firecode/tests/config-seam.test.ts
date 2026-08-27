@@ -124,13 +124,20 @@ test("Master 固定角色对象严格解析原子与 fallback", async () => {
 				fallback: ["test/a/low", "test/b/low", "test/c/low"],
 			},
 			哨兵: { model: "test/model/turbo", use: "坏档" },
+			调研员: { model: "test/model", use: "漏写思考档" },
 			自定义角色: { model: "test/model/low", use: "未知" },
 		},
 	}, problems);
 	expect(problems).toContain("未知角色 master.roles.自定义角色，可用：调研员 / 工程师 / 全栈 / 架构师 / 设计师 / 哨兵");
 	expect(problems).toContain("未知字段 master.roles.工程师.thinking");
-	expect(problems).toContain("master.roles.工程师.model 模型无效：必须是 provider/model");
-	expect(problems).toContain("master.roles.哨兵.model 思考档无效：turbo");
+	expect(problems).toContain(
+		"master.roles.工程师.model 必须是“provider/model/thinking”字符串（模型段不是 provider/model：invalid-model）",
+	);
+	expect(problems).toContain("master.roles.哨兵.model 必须是“provider/model/thinking”字符串（思考档无效：turbo）");
+	// 两段式旧写法同时踩中两项校验，仍然只报一条并给出目标形状。
+	expect(problems).toContain(
+		"master.roles.调研员.model 必须是“provider/model/thinking”字符串（模型段不是 provider/model：test；思考档无效：model）",
+	);
 	expect(problems).toContain("master.roles.工程师.fallback 必须是至多 2 项的数组");
 
 	const emptyProblems: string[] = [];
@@ -140,6 +147,25 @@ test("Master 固定角色对象严格解析原子与 fallback", async () => {
 	const legacyProblems: string[] = [];
 	parseMasterConfig({ models: [{ role: "工程师", model: "test/model/low", use: "旧数组" }] }, legacyProblems);
 	expect(legacyProblems).toEqual(["未知字段 master.models"]);
+});
+
+test("preset 只认模型原子，旧的三字段写法被拒", async () => {
+	const { loadConfig } = await loadFirecodeModule("config.ts", {
+		configJsonc: JSON.stringify({
+			presets: {
+				new: { model: "test/model/high", key: "alt+1" },
+				old: { provider: "test", model: "model", thinkingLevel: "high" },
+			},
+		}),
+	});
+	const loaded = (loadConfig as () => { config: any; problems: string[] })();
+
+	expect(loaded.config.presets.new.model).toEqual({ model: "test/model", thinking: "high" });
+	expect(loaded.problems).toContain("未知字段 presets.old.provider");
+	expect(loaded.problems).toContain("未知字段 presets.old.thinkingLevel");
+	expect(loaded.problems).toContain(
+		"presets.old.model 必须是“provider/model/thinking”字符串（模型段不是 provider/model：model；思考档无效：model）",
+	);
 });
 
 test("公共配置模板可解析并启用完整推荐工作流", async () => {

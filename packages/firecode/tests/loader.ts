@@ -35,8 +35,8 @@ const PI_TUI = pathToFileURL(join(PI_PACKAGES, "tui/src/index.ts")).href;
 const created: string[] = [];
 const NON_RUNTIME_ROOTS = new Set([".git", "docs", "tests"]);
 export const TEST_REVIEW_CONFIG = {
-	advisor: { model: "test/advisor", thinking: "high" },
-	reviewers: [{ model: "test/reviewer", thinking: "high" }],
+	advisor: "test/advisor/high",
+	reviewers: ["test/reviewer/high"],
 	maxRounds: 3,
 	advisorAfterFailures: 2,
 	timeoutMinutes: 1,
@@ -59,7 +59,7 @@ const TEST_CONFIG_JSONC = JSON.stringify({
 		master: false,
 	},
 	keys: { rename: "ctrl+r", cyclePreset: "ctrl+shift+u", fast: "ctrl+f" },
-	presets: { deep: { thinkingLevel: "high", key: "alt+1" } },
+	presets: { deep: { model: "test/deep/high", key: "alt+1" } },
 	review: TEST_REVIEW_CONFIG,
 });
 

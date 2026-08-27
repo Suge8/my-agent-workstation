@@ -23,10 +23,15 @@ type OriginalState = {
 const title = (text: string): string =>
 	text ? `${text[0].toUpperCase()}${text.slice(1)}` : text;
 
+/** 模型原子在配置层已校验为 provider/model；调 Pi 接口时才拆成两段。 */
+function splitModel(id: string): [provider: string, model: string] {
+	const slash = id.indexOf("/");
+	return [id.slice(0, slash), id.slice(slash + 1)];
+}
+
 function describe(preset: Preset): string {
 	const parts: string[] = [];
-	if (preset.provider && preset.model) parts.push(`${preset.provider}/${preset.model}`);
-	if (preset.thinkingLevel) parts.push(`thinking:${preset.thinkingLevel}`);
+	if (preset.model) parts.push(preset.model.model, `thinking:${preset.model.thinking}`);
 	if (preset.tools) parts.push(`tools:${preset.tools.join(",")}`);
 	if (preset.instructions) {
 		const preview =
@@ -68,22 +73,17 @@ export function registerPresets(pi: ExtensionAPI): void {
 			};
 		}
 
-		if (preset.provider && preset.model) {
-			const model = ctx.modelRegistry.find(preset.provider, preset.model);
+		if (preset.model) {
+			const [provider, id] = splitModel(preset.model.model);
+			const model = ctx.modelRegistry.find(provider, id);
 			if (!model) {
-				ctx.ui.notify(
-					`Preset "${name}": Model ${preset.provider}/${preset.model} not found`,
-					"warning",
-				);
+				ctx.ui.notify(`Preset "${name}": Model ${preset.model.model} not found`, "warning");
 			} else if (!(await pi.setModel(model))) {
-				ctx.ui.notify(
-					`Preset "${name}": No API key for ${preset.provider}/${preset.model}`,
-					"warning",
-				);
+				ctx.ui.notify(`Preset "${name}": No API key for ${preset.model.model}`, "warning");
+			} else {
+				pi.setThinkingLevel(preset.model.thinking);
 			}
 		}
-
-		if (preset.thinkingLevel) pi.setThinkingLevel(preset.thinkingLevel);
 
 		if (preset.tools?.length) {
 			const known = new Set(pi.getAllTools().map((tool) => tool.name));

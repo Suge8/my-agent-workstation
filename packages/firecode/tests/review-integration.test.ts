@@ -143,7 +143,7 @@ async function loadReviewWithVerdict(verdict: string, maxRounds?: number) {
 	const script = join(tmpdir(), `fake-review-${Date.now()}-${Math.random()}`);
 	const review = (await loadFirecodeModule("review/index.js", {
 		configJsonc: reviewConfig({
-			reviewers: [{ model: "p/one", thinking: "low" }],
+			reviewers: ["p/one/low"],
 			...(maxRounds === undefined ? {} : { maxRounds }),
 		}),
 	})) as { registerReview: (pi: unknown, enabled?: boolean, broken?: boolean, dependencies?: unknown) => void };
@@ -478,7 +478,7 @@ describe("registerReview wiring", () => {
 		let started!: () => void;
 		const sessionStarted = new Promise<void>((resolve) => { started = resolve; });
 		const module = (await loadFirecodeModule("review/index.js", {
-			configJsonc: reviewConfig({ reviewers: [{ model: "p/one", thinking: "low" }] }),
+			configJsonc: reviewConfig({ reviewers: ["p/one/low"] }),
 		})) as {
 			registerReview: (pi: unknown, enabled?: boolean, broken?: boolean, dependencies?: unknown) => void;
 			__reviewFlushForTests: () => Promise<void>;
@@ -906,7 +906,7 @@ describe("review config is rejected at every entry point", () => {
 	test("enabled Review requires an explicit complete section with models", async () => {
 		for (const configJsonc of [
 			'{"features":{"review":true}}',
-			reviewConfig({ advisor: { model: "", thinking: "high" }, reviewers: [] }),
+			reviewConfig({ advisor: "", reviewers: [] }),
 		]) {
 			const { registerReview } = await loadWithConfig(configJsonc);
 			const sessionManager = makeSessionManager();
@@ -1025,7 +1025,7 @@ describe("reload recovery actually resumes the loop", () => {
 		await loadAll();
 		const marker = join(tmpdir(), `fire-review-marker-${Date.now()}`);
 		const module = (await loadFirecodeModule("review/index.js", {
-			configJsonc: reviewConfig({ reviewers: [{ model: "p/one", thinking: "low" }] }),
+			configJsonc: reviewConfig({ reviewers: ["p/one/low"] }),
 		})) as {
 			registerReview: (pi: unknown, enabled?: boolean, broken?: boolean, dependencies?: unknown) => void;
 			__reviewFlushForTests: () => Promise<void>;

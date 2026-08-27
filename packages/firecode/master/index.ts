@@ -12,7 +12,7 @@ import {
 	type ExtensionAPI,
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { MASTER_ROLES, loadConfig, type MasterModelAtom, type MasterRole } from "../config.js";
+import { MASTER_ROLES, loadConfig, type ModelAtom, type MasterRole } from "../config.js";
 import { deliver } from "../deliver.js";
 import { formatDuration } from "../format.js";
 import { readReviewOutcome, type ReviewOutcome } from "../review/outcome.js";
@@ -929,8 +929,8 @@ function resolveRole(roles: MasterRole[], role: string): MasterRole {
 	return entry;
 }
 
-function nextFallback(role: MasterRole, worker: WorkerRef): MasterModelAtom | undefined {
-	const chain: MasterModelAtom[] = [role, ...role.fallback];
+function nextFallback(role: MasterRole, worker: WorkerRef): ModelAtom | undefined {
+	const chain: ModelAtom[] = [role, ...role.fallback];
 	let index = chain.findIndex((atom) => atom.model === worker.model && atom.thinking === worker.thinking);
 	if (index < 0) index = chain.findIndex((atom) => atom.model === worker.model);
 	return chain[index + 1];
@@ -945,7 +945,7 @@ function rosterText(models: MasterRole[]): string {
 	}).join("；");
 }
 
-function modelAtomText(atom: Pick<MasterModelAtom, "model" | "thinking">): string {
+function modelAtomText(atom: Pick<ModelAtom, "model" | "thinking">): string {
 	return `${atom.model}/${atom.thinking}`;
 }
 
