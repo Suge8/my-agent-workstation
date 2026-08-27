@@ -21,15 +21,16 @@
 ```bash
 npm install --global --ignore-scripts @earendil-works/pi-coding-agent@latest
 curl -fsSL https://herdr.dev/install.sh -o /tmp/herdr-install.sh && /bin/sh /tmp/herdr-install.sh
+export PATH="$HOME/.local/bin:$PATH"
 herdr channel set stable
 herdr integration install pi
 ```
 
-Herdr 装在 `~/.local/bin/herdr`，该目录进 PATH 的动作留到步骤 7 统一写进 `workstation.zsh`；本步骤内先用绝对路径 `~/.local/bin/herdr` 调用。
+那行 `export` 只管当前会话：官方安装脚本把 herdr 放在 `$HOME/.local/bin`，补进 PATH 后本步骤全程用裸 `herdr` 命令即可；让以后每次开 shell 都能解析到的永久动作留到步骤 7 统一写进 `workstation.zsh`。
 
-**完成标准**：`pi --version` 与 `~/.local/bin/herdr --version` 各自打印版本号。
+**完成标准**：`pi --version` 与 `herdr --version` 各自打印版本号。
 
-可选——让 `herdr server` 开机自启：在 `~/Library/LaunchAgents/` 下写一个 plist，`ProgramArguments` 为 herdr 绝对路径加 `server`，`RunAtLoad` 为 true，`StandardOutPath` / `StandardErrorPath` 指向 `~/.local/state/herdr/` 下的日志文件，然后 `launchctl bootstrap gui/$(id -u) <plist>`。完成标准：`launchctl print gui/$(id -u)/<label>` 显示 state = running。读者不要求开机自启时跳过本段。
+可选——让 `herdr server` 开机自启：在 `~/Library/LaunchAgents/` 下写一个 plist，`ProgramArguments` 为 herdr 绝对路径（plist 不走 PATH，用 `command -v herdr` 取一次实际值直接写进文件）加 `server`，`RunAtLoad` 为 true，`StandardOutPath` / `StandardErrorPath` 指向 `~/.local/state/herdr/` 下的日志文件，然后 `launchctl bootstrap gui/$(id -u) <plist>`。完成标准：`launchctl print gui/$(id -u)/<label>` 显示 state = running。读者不要求开机自启时跳过本段。
 
 ## 步骤 2：安装 Pi package
 
@@ -40,7 +41,7 @@ pi install <repo>
 pi install npm:pi-antigravity
 ```
 
-**完成标准**：`pi list` 的输出中同时出现 `firecode` 与 `pi-antigravity`。
+**完成标准**：`pi list` 裸退出码为 0，输出里能认出两个条目——一个指向本仓库目录（本地目录安装的显示名由 Pi 决定，不必匹配某个固定字符串），一个是 `pi-antigravity`。
 
 ## 步骤 3：登录供应商（人工关口）
 
@@ -79,7 +80,7 @@ pi install npm:pi-antigravity
 
 `~/.pi/agent/keybindings.json` 并入 `config/models.json` 的 `keybindings` 段（六条绑定，原样照抄）。其中 `tui.input.tab` 是空数组，意图是腾出 Tab 给 thinking 切换，保留空值、别当无效项删掉。
 
-`~/.pi/agent/extensions/firecode/config.jsonc`——**扩展名是 `.jsonc`，内容按纯 JSON 写**。权威 schema 是 `packages/firecode/config.example.jsonc`，**以它为基底复制过去再替换模型字段**：
+`~/.pi/agent/extensions/firecode/config.jsonc`——扩展名是 `.jsonc`，允许 `//` 行注释与块注释，基底自带的注释随复制保留即可。权威 schema 是 `packages/firecode/config.example.jsonc`，**以它为基底复制过去再替换模型字段**：
 
 ```bash
 mkdir -p ~/.pi/agent/extensions/firecode
@@ -94,14 +95,7 @@ cp <repo>/packages/firecode/config.example.jsonc ~/.pi/agent/extensions/firecode
 
 替换范围就这些：所有模型原子的思考档沿用基底，只替换前两段 `provider/model`；`presets` 按步骤 4 的表绑定 `alt+1` 到 `alt+7`，别名自取；`watcher` 换成步骤 4 的观察员模型；`master.roles` 六个角色逐个换成读者已登录的模型，含各自的 `fallback`；`review` 只改 `advisor` 与 `reviewers`，其余字段沿用基底值。
 
-**完成标准**：下面这条命令裸退出码为 0（`config.jsonc` 去掉注释后按 JSON 校验）——
-
-```bash
-node -e 'const fs=require("fs");for(const f of process.argv.slice(1)){JSON.parse(fs.readFileSync(f,"utf8").replace(/^\s*\/\/.*$/gm,""));console.log("OK",f)}' \
-  ~/.pi/agent/settings.json ~/.pi/agent/keybindings.json ~/.pi/agent/extensions/firecode/config.jsonc
-```
-
-再重启 `pi`：状态栏出现 FireCode 行，按 `alt+1` 后状态栏模型名切换到 alt+1 绑定的模型。
+**完成标准**：重启 `pi` 后状态栏出现 FireCode 行，按 `alt+1` 状态栏模型名切换到 alt+1 绑定的模型。配置有问题时 FireCode 会在启动时报出——它连模型原子的形状一起校验——照提示修正即可。
 
 ## 步骤 6：系统提示词
 
@@ -203,8 +197,8 @@ Bark 推送地址写入 `~/.pi/agent/bark-key`，随后 `chmod 600` 该文件。
 
 | 装了什么 | 落点 | 对已有文件的改动 |
 | --- | --- | --- |
-| 全局 npm 包 | `pi`、`pi-antigravity` 源、`better-computer-use`、`cloakbrowser` | 新增 |
-| Herdr | `~/.local/bin/herdr`；可选 `~/Library/LaunchAgents/<label>.plist` 与 `~/.local/state/herdr/*.log`；`herdr integration install pi` 写入 Pi 配置目录 | 新增 |
+| 全局 npm 包 | `pi` 与 `cloakbrowser` 来自 npm registry；`better-computer-use` 由本仓库源码打包后本地安装（npm 上没有这个包）；`pi-antigravity` 由 Pi 自己管理 | 新增 |
+| Herdr | herdr 可执行文件（`command -v herdr`）；可选 `~/Library/LaunchAgents/<label>.plist` 与 `~/.local/state/herdr/*.log`；`herdr integration install pi` 写入 Pi 配置目录 | 新增 |
 | Pi 扩展与 Skills | `~/.pi/agent/extensions/firecode`、`…/pi-antigravity`、Skills 注册项 | 新增 |
 | Pi 设置 / 键位 | `~/.pi/agent/settings.json`、`keybindings.json` | 合并上述键，其余保留 |
 | FireCode 配置 | `~/.pi/agent/extensions/firecode/config.jsonc` | 整体写入 |
