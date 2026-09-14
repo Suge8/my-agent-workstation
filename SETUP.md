@@ -93,10 +93,10 @@ Ghostty 的 `macos-option-as-alt = true` 是步骤 4 alt 预设键的前提；CJ
 
 ```bash
 npm install --global github:Suge8/better-computer-use
-pi install git:github.com/Suge8/better-computer-use
+pi install "$(npm root -g)/better-computer-use"
 ```
 
-第一条装 `bcu` 命令，第二条把仓库里的 `skills/` 装进 Pi。helper app 在首次运行命令时自动安装。然后转达读者：终端运行 `bcu setup`，在「系统设置 → 隐私与安全性」给 `bcu.app` 勾选**辅助功能**和**屏幕录制**，回终端按回车完成校验。
+第一条装 `bcu` 命令，第二条把同一份包里的 `skills/` 装进 Pi（不要用 `pi install git:`，Pi 以 `--omit=dev` 安装会让 `prepare` 缺 esbuild）。helper app 在首次运行命令时自动安装。然后转达读者：终端运行 `bcu setup`，在「系统设置 → 隐私与安全性」给 `bcu.app` 勾选**辅助功能**和**屏幕录制**，回终端按回车完成校验。
 
 **完成标准**：`bcu doctor` 裸退出码为 0。
 
