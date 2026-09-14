@@ -1,0 +1,19 @@
+{
+  "app.model.cycleForward": [
+    "shift+tab"
+  ],
+  "tui.input.tab": [],
+  "tui.editor.cursorWordRight": [
+    "alt+right",
+    "ctrl+right"
+  ],
+  "tui.editor.cursorRight": [
+    "right"
+  ],
+  "app.thinking.cycle": [
+    "tab"
+  ],
+  "app.session.rename": [
+    "alt+r"
+  ]
+}

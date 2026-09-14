@@ -1,0 +1,45 @@
+{
+  "providers": {
+    "deepseek": {
+      "models": [
+        {
+          "id": "deepseek-flash",
+          "name": "DeepSeek Flash",
+          "api": "openai-responses",
+          "baseUrl": "https://api.deepseek.com",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 1000000,
+          "maxTokens": 384000,
+          "thinkingLevelMap": {
+            "off": "none",
+            "minimal": null,
+            "low": "low",
+            "medium": null,
+            "high": "high",
+            "xhigh": null,
+            "max": "max"
+          }
+        }
+      ]
+    },
+    "openai-codex": {
+      "baseUrl": "https://chatgpt.com/backend-api",
+      "apiKey": "!node -e 'const fs=require(\"fs\"),path=require(\"path\");const dir=process.env.CODEX_HOME||path.join(process.env.HOME,\".codex\");const files=[path.join(dir,\"auth.json\"),path.join(dir,\"Auth.json\")];const file=files.find(f=>fs.existsSync(f));if(!file)process.exit(1);const a=JSON.parse(fs.readFileSync(file,\"utf8\"));const t=a.tokens&&a.tokens.access_token;if(!t)process.exit(1);const p=JSON.parse(Buffer.from(t.split(\".\")[1],\"base64url\").toString(\"utf8\"));if(!p.exp||p.exp*1000<Date.now()+60000)process.exit(1);process.stdout.write(t);'",
+      "modelOverrides": {
+        "gpt-6-astra": {
+          "contextWindow": 1050000
+        },
+        "gpt-5.6-luna": {
+          "contextWindow": 1050000
+        },
+        "gpt-5.6-sol": {
+          "contextWindow": 1050000
+        }
+      }
+    }
+  }
+}

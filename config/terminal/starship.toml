@@ -1,9 +1,0 @@
-add_newline = false
-
-[character]
-success_symbol = "[❯](bold green)"
-error_symbol = "[❯](bold red)"
-
-[cmd_duration]
-min_time = 1000
-format = "[$duration]($style) "

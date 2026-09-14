@@ -1,3 +1,0 @@
-interface:
-  display_name: "Wizard"
-  short_description: "生成交互式配置向导"

@@ -1,0 +1,41 @@
+{
+  "lastChangelogVersion": "0.85.1",
+  "defaultProvider": "anthropic",
+  "defaultModel": "claude-fable-5-1",
+  "defaultThinkingLevel": "medium",
+  "theme": "light/midnight-rose",
+  "extensions": [
+    "!extensions/*.test.ts",
+    "!tps.ts"
+  ],
+  "quietStartup": true,
+  "defaultProjectTrust": "always",
+  "enabledModels": [
+    "openai-codex/gpt-5.6-sol",
+    "openai-codex/gpt-5.6-luna",
+    "anthropic/claude-fable-5-1",
+    "anthropic/claude-sonnet-5",
+    "anthropic/claude-opus-5",
+    "anthropic/claude-opus-4-6",
+    "xai/grok-4.6",
+    "deepseek/deepseek-flash",
+    "kimi-coding/k3",
+    "kimi-coding/k3-256k",
+    "antigravity/gemini-3.8-flash"
+  ],
+  "hideThinkingBlock": true,
+  "showCacheMissNotices": true,
+  "warnings": {
+    "anthropicExtraUsage": false
+  },
+  "compaction": {
+    "enabled": true,
+    "reserveTokens": 36000
+  },
+  "terminal": {
+    "showTerminalProgress": true
+  },
+  "treeFilterMode": "no-tools",
+  "tuiMode": "regular",
+  "fullscreenExitOutput": "transcript"
+}

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Context7"
-  short_description: "拉取最新库文档"
-  default_prompt: "Use $context7 to fetch current library docs."
