@@ -47,18 +47,26 @@ herdr integration install pi
 
 **完成标准**：六个文件就位。模型字段留到步骤 4 校正。
 
-## 步骤 3：Pi package 与登录（人工关口）
+## 步骤 3：Skills、Pi 扩展与登录（人工关口）
+
+Skills 落在所有 agent 共用的 `~/.agents/skills`，Pi 自动从这里读；architecture-wiki 的 skill 随它自己的仓库发布，clone 后 symlink 进来：
+
+```bash
+git clone https://github.com/Suge8/skills ~/.agents/skills
+git clone https://github.com/Suge8/architecture-wiki ~/Project/architecture-wiki
+ln -s ~/Project/architecture-wiki/skills/architecture-wiki ~/.agents/skills/development/architecture-wiki
+```
+
+Pi 扩展：
 
 ```bash
 pi install git:github.com/Suge8/firecode
-pi install git:github.com/Suge8/agent-skills
-pi install git:github.com/Suge8/architecture-wiki
 pi install npm:pi-antigravity
 ```
 
 然后让读者启动 `pi` 执行 `/login`，至少完成一个供应商；作者用到 `openai-codex`、`anthropic`、`xai`、`deepseek`、`kimi-coding`、`antigravity`。
 
-**完成标准**：`pi list` 列出四个包；`pi --list-models` 至少一个模型。
+**完成标准**：`pi list` 列出两个包；`pi --list-models` 至少一个模型；`ls ~/.agents/skills/development/architecture-wiki/SKILL.md` 存在。
 
 ## 步骤 4：校正模型
 
@@ -93,10 +101,10 @@ Ghostty 的 `macos-option-as-alt = true` 是步骤 4 alt 预设键的前提；CJ
 
 ```bash
 npm install --global github:Suge8/better-computer-use
-pi install "$(npm root -g)/better-computer-use"
+ln -s "$(npm root -g)/better-computer-use/skills/better-computer-use" ~/.agents/skills/operations/better-computer-use
 ```
 
-第一条装 `bcu` 命令，第二条把同一份包里的 `skills/` 装进 Pi（不要用 `pi install git:`，Pi 以 `--omit=dev` 安装会让 `prepare` 缺 esbuild）。helper app 在首次运行命令时自动安装。然后转达读者：终端运行 `bcu setup`，在「系统设置 → 隐私与安全性」给 `bcu.app` 勾选**辅助功能**和**屏幕录制**，回终端按回车完成校验。
+第一条装 `bcu` 命令，第二条把同一份包里的 skill 接进共用目录。helper app 在首次运行命令时自动安装。然后转达读者：终端运行 `bcu setup`，在「系统设置 → 隐私与安全性」给 `bcu.app` 勾选**辅助功能**和**屏幕录制**，回终端按回车完成校验。
 
 **完成标准**：`bcu doctor` 裸退出码为 0。
 
@@ -135,7 +143,8 @@ Bark 推送地址写入 `~/.pi/agent/bark-key` 并 `chmod 600`，格式 `https:/
 | --- | --- | --- |
 | 全局 npm | `pi`、`cloakbrowser`、`better-computer-use`（来自 GitHub） | 新增 |
 | Herdr | `command -v herdr`；可选 LaunchAgent plist 与 `~/.local/state/herdr/*.log`；`herdr integration install pi` 写入 Pi 配置目录 | 新增 |
-| Pi package | `settings.json` 的 `packages`：firecode、agent-skills、architecture-wiki、pi-antigravity、better-computer-use | 新增 |
+| Skills | `~/.agents/skills`（clone）、`~/Project/architecture-wiki`（clone）、两个 symlink | 新增 |
+| Pi package | `settings.json` 的 `packages`：firecode、pi-antigravity | 新增 |
 | Pi 配置 | `~/.pi/agent/` 下 `settings.json`、`keybindings.json`、`models.json` | 合并 |
 | Pi 配置 | `~/.pi/agent/SYSTEM.md`、`themes/midnight-rose.json`、`extensions/firecode/config.jsonc` | 整体写入，原件留底 |
 | Bark | `~/.pi/agent/bark-key` | 新增 |

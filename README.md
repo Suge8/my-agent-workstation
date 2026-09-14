@@ -6,6 +6,6 @@
 
 **运行前提：**Apple Silicon、macOS 14+、Zsh。
 
-代码在各自仓库：[firecode](https://github.com/Suge8/firecode)、[agent-skills](https://github.com/Suge8/agent-skills)、[architecture-wiki](https://github.com/Suge8/architecture-wiki)、[better-computer-use](https://github.com/Suge8/better-computer-use)。
+代码在各自仓库：[firecode](https://github.com/Suge8/firecode)、[skills](https://github.com/Suge8/skills)、[architecture-wiki](https://github.com/Suge8/architecture-wiki)、[better-computer-use](https://github.com/Suge8/better-computer-use)。
 
 个人配置按原样提供，不承诺版本兼容与卸载支持。[MIT License](LICENSE)。
