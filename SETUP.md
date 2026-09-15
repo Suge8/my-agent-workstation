@@ -61,12 +61,11 @@ Pi 扩展：
 
 ```bash
 pi install git:github.com/Suge8/firecode
-pi install npm:pi-antigravity
 ```
 
-然后让读者启动 `pi` 执行 `/login`，至少完成一个供应商；作者用到 `openai-codex`、`anthropic`、`xai`、`deepseek`、`kimi-coding`、`antigravity`。
+然后让读者启动 `pi` 执行 `/login`，至少完成一个供应商；作者用到 `openai-codex`、`anthropic`、`xai`、`deepseek`、`kimi-coding`。
 
-**完成标准**：`pi list` 列出两个包；`pi --list-models` 至少一个模型；`ls ~/.agents/skills/development/architecture-wiki/SKILL.md` 存在。
+**完成标准**：`pi list` 列出 firecode；`pi --list-models` 至少一个模型；`ls ~/.agents/skills/development/architecture-wiki/SKILL.md` 存在。
 
 ## 步骤 4：校正模型
 
@@ -144,7 +143,7 @@ Bark 推送地址写入 `~/.pi/agent/bark-key` 并 `chmod 600`，格式 `https:/
 | 全局 npm | `pi`、`cloakbrowser`、`better-computer-use`（来自 GitHub） | 新增 |
 | Herdr | `command -v herdr`；可选 LaunchAgent plist 与 `~/.local/state/herdr/*.log`；`herdr integration install pi` 写入 Pi 配置目录 | 新增 |
 | Skills | `~/.agents/skills`（clone）、`~/Project/architecture-wiki`（clone）、两个 symlink | 新增 |
-| Pi package | `settings.json` 的 `packages`：firecode、pi-antigravity | 新增 |
+| Pi package | `settings.json` 的 `packages`：firecode | 新增 |
 | Pi 配置 | `~/.pi/agent/` 下 `settings.json`、`keybindings.json`、`models.json` | 合并 |
 | Pi 配置 | `~/.pi/agent/SYSTEM.md`、`themes/midnight-rose.json`、`extensions/firecode/config.jsonc` | 整体写入，原件留底 |
 | Bark | `~/.pi/agent/bark-key` | 新增 |

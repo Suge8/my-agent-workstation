@@ -51,10 +51,10 @@
 				"fallback": ["anthropic/claude-sonnet-5/medium"]
 			},
 			"工程师": {
-				"model": "openai-codex/gpt-6-astra/medium",
+				"model": "anthropic/claude-opus-5/medium",
 				"use": "实现、调试",
 				"fallback": [
-					"anthropic/claude-opus-5/medium",
+					"openai-codex/gpt-6-astra/high",
 					"anthropic/claude-fable-5-1/low"
 				]
 			},
@@ -79,8 +79,7 @@
 		"astra": { "model": "openai-codex/gpt-6-astra/medium", "key": "alt+3" },
 		"ds": { "model": "deepseek/deepseek-flash/high", "key": "alt+4" },
 		"sol": { "model": "openai-codex/gpt-5.6-sol/medium", "key": "alt+5" },
-		"gemini": { "model": "antigravity/gemini-3.8-flash/high", "key": "alt+6" },
-		"xai": { "model": "xai/grok-4.6/high", "key": "alt+7" }
+		"xai": { "model": "xai/grok-4.6/high", "key": "alt+6" }
 	},
 
 	// /fire-review 对抗性审查：几个审查模型并行挑毛病，全部说过才算过；
