@@ -31,7 +31,7 @@
 
 	// 配置里凡是指定模型的位置都写同一个模型原子："provider/model/thinking"（思考档取最后一段：
 	// off minimal low medium high xhigh max），presets、watcher、master、review 一致。
-	// /fire-master 的角色表：六个固定角色（调研员/工程师/全栈/架构师/设计师/哨兵）按名做键，
+	// /fire-master 角色表：固定角色（调研员/工程师/设计师/哨兵）按名做键，
 	// 可只配子集；每个角色：model 原子 + use 适用场景 +
 	// 可选 fallback（供应商故障时同会话自动降级续跑，至多 2 个，同为原子写法）。Master 派单只报角色名；
 	// 某个模型没额度了就改这里（重启生效），或直接口头告诉 Master 换角色（不用改配置）。
@@ -46,27 +46,27 @@
 	"master": {
 		"roles": {
 			"调研员": {
-				"model": "openai-codex/gpt-5.6-luna/high",
+				"model": "anthropic/claude-sonnet-5/medium",
 				"use": "大量搜索、读日志、找线索；不实现",
-				"fallback": ["anthropic/claude-sonnet-5/medium"]
+				"fallback": ["openai-codex/gpt-5.6-luna/high"]
 			},
 			"工程师": {
 				"model": "anthropic/claude-opus-5/medium",
 				"use": "实现、调试",
 				"fallback": [
-					"openai-codex/gpt-6-astra/high",
+					"openai-codex/gpt-6-astra/low",
 					"anthropic/claude-fable-5-1/low"
 				]
 			},
 			"设计师": {
-				"model": "openai-codex/gpt-6-astra/low",
+				"model": "anthropic/claude-opus-5/medium",
 				"use": "视觉、前端",
-				"fallback": ["anthropic/claude-opus-5/medium"]
+				"fallback": ["openai-codex/gpt-6-astra/low"]
 			},
 			"哨兵": {
-				"model": "openai-codex/gpt-5.6-luna/low",
+				"model": "anthropic/claude-sonnet-5/low",
 				"use": "CI、部署、长测试等待",
-				"fallback": ["anthropic/claude-sonnet-5/low"]
+				"fallback": ["openai-codex/gpt-5.6-luna/low"]
 			}
 		}
 	},
@@ -91,11 +91,8 @@
 	// language：审查报告语言 zh/en。
 	// 本节字段必须齐全；拼错字段名会直接报配置错误而不是静默忽略。
 	"review": {
-		"advisor": "anthropic/claude-fable-5-1/high",
-		"reviewers": [
-			"openai-codex/gpt-6-astra/medium",
-			"anthropic/claude-opus-5/medium"
-		],
+		"advisor": "anthropic/claude-fable-5-1/medium",
+		"reviewers": ["anthropic/claude-opus-5/medium"],
 		"maxRounds": 5,
 		"advisorAfterFailures": 2,
 		"timeoutMinutes": 20,
