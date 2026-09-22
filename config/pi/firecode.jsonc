@@ -95,7 +95,7 @@
 		"reviewers": ["anthropic/claude-opus-5/medium"],
 		"maxRounds": 5,
 		"advisorAfterFailures": 2,
-		"timeoutMinutes": 20,
+		"timeoutMinutes": 40,
 		"tools": ["read", "grep", "find", "ls", "bash"],
 		"language": "zh"
 	}
