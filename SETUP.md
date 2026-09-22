@@ -22,11 +22,12 @@ curl -fsSL https://herdr.dev/install.sh -o /tmp/herdr-install.sh && /bin/sh /tmp
 export PATH="$HOME/.local/bin:$PATH"
 herdr channel set stable
 herdr integration install pi
+herdr plugin install -y smarzban/herdr-file-viewer
 ```
 
-**完成标准**：`pi --version` 与 `herdr --version` 各自打印版本号。
+`config/herdr/config.toml` 复制到 `~/.config/herdr/config.toml`。侧边栏那行会话名由 pi 集成上报，`prefix+f` 的文件浏览器来自上面的插件，两者缺一对应内容就消失。
 
-可选——`herdr server` 开机自启：在 `~/Library/LaunchAgents/` 写 plist，`ProgramArguments` 为 `command -v herdr` 的绝对路径加 `server`，`RunAtLoad` 为 true，日志指向 `~/.local/state/herdr/`，然后 `launchctl bootstrap gui/$(id -u) <plist>`。
+**完成标准**：`pi --version` 与 `herdr --version` 各自打印版本号；`herdr config check` 输出 `ok`。
 
 ## 步骤 2：Pi 配置
 
@@ -141,7 +142,7 @@ Bark 推送地址写入 `~/.pi/agent/bark-key` 并 `chmod 600`，格式 `https:/
 | 装了什么 | 落点 | 对已有文件的改动 |
 | --- | --- | --- |
 | 全局 npm | `pi`、`cloakbrowser`、`better-computer-use`（来自 GitHub） | 新增 |
-| Herdr | `command -v herdr`；可选 LaunchAgent plist 与 `~/.local/state/herdr/*.log`；`herdr integration install pi` 写入 Pi 配置目录 | 新增 |
+| Herdr | `command -v herdr`、`~/.config/herdr/`（配置、插件、会话状态）；`herdr integration install pi` 写入 Pi 配置目录 | 新增 |
 | Skills | `~/.agents/skills`（clone）、`~/Project/architecture-wiki`（clone）、两个 symlink | 新增 |
 | Pi package | `settings.json` 的 `packages`：firecode | 新增 |
 | Pi 配置 | `~/.pi/agent/` 下 `settings.json`、`keybindings.json`、`models.json` | 合并 |

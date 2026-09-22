@@ -1,0 +1,40 @@
+onboarding = false
+
+[ui]
+mouse_scroll_lines = 1
+show_agent_labels_on_pane_borders = true
+agent_panel_sort = "spaces"
+status_indicators = "symbols"
+
+[ui.toast]
+delivery = "system"
+
+# $session 是 Pi 集成实时上报的会话名，Ctrl+R 改名后侧边栏立刻跟着变；默认行模板里没有它。
+# rows_by_agent 整行替换而非追加，所以 state_icon/workspace/agent 都得写全。
+# $session 默认是 overlay 灰 + 弱化，改成 one-dark 主文本色 + 加粗，与工作区名同档。
+[ui.sidebar.agents.rows_by_agent]
+pi = [["state_icon", "workspace", { token = "$session", fg = "#abb2bf", bold = true, dim = false }], ["agent"]]
+
+[theme]
+name = "one-light"
+auto_switch = false
+
+[keys]
+# Ctrl+1..9 直达第 N 个 agent，Ctrl+Shift+1..9 直达第 N 个工作区（Pi 的 preset 用 Alt+1..9，两边错开不冲突）
+focus_agent = "ctrl+1..9"
+switch_workspace = "ctrl+shift+1..9"
+
+[[keys.command]]
+key = "prefix+f"
+type = "plugin_action"
+command = "herdr-file-viewer.open-file-viewer"
+description = "open file viewer in split"
+
+[[keys.command]]
+key = "prefix+shift+f"
+type = "plugin_action"
+command = "herdr-file-viewer.open-file-viewer-tab"
+description = "open file viewer in tab"
+
+[experimental]
+kitty_graphics = true

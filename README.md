@@ -1,6 +1,6 @@
 # My Agent Workstation
 
-作者本人的 coding agent 工作站：Pi 配置、FireCode 与 Skills 的模型角色表、终端配置。`config/` 下是作者机器上真实在用的文件。
+作者本人的 coding agent 工作站：Pi 配置、FireCode 与 Skills 的模型角色表、Herdr 与终端配置。`config/` 下是作者机器上真实在用的文件。
 
 **用法：**把链接发给你的 agent，让它克隆仓库并按 `SETUP.md` 配置电脑。
 
