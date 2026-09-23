@@ -12,7 +12,7 @@
 
 ## 人工关口
 
-只能读者本人做的事，到达时停下、给出明确指令、等确认再继续：Pi `/login`（步骤 3）；`bcu setup` 与系统设置授权（步骤 6）；填写 API key、Bark 地址、Context7 OAuth（步骤 8）；在隔离浏览器里登录站点（步骤 7 之后按需）。
+只能读者本人做的事，到达时停下、给出明确指令、等确认再继续：Pi `/login`（步骤 3）；`bcu setup` 与系统设置授权（步骤 6）；填写 TinyFish key 与 Bark 地址（步骤 8）；在隔离浏览器里登录站点（步骤 7 之后按需）。
 
 ## 步骤 1：Pi 与 Herdr
 
@@ -42,7 +42,7 @@ herdr plugin install -y smarzban/herdr-file-viewer
 | `themes/midnight-rose.json` | `~/.pi/agent/themes/midnight-rose.json` | 复制 |
 | `firecode.jsonc` | `~/.pi/agent/extensions/firecode/config.jsonc` | 整体写入 |
 
-转达读者两件事：SYSTEM.md 会把 agent 的语气、验证纪律、改动前对齐习惯换成作者那套，想保留自己的风格就跳过；`models.json` 里 `openai-codex` 段复用 Codex CLI 的登录（读 `~/.codex/auth.json`），没装 Codex CLI 就删掉这一段改用 `/login`。
+转达读者：SYSTEM.md 会把 agent 的语气、验证纪律、改动前对齐习惯换成作者那套，想保留自己的风格就跳过。
 
 `keybindings.json` 里 `tui.input.tab` 是空数组，意图是腾出 Tab 给 thinking 切换，别当无效项删。
 
@@ -64,7 +64,7 @@ Pi 扩展：
 pi install git:github.com/Suge8/firecode
 ```
 
-然后让读者启动 `pi` 执行 `/login`，至少完成一个供应商；作者用到 `openai-codex`、`anthropic`、`xai`、`deepseek`、`kimi-coding`。
+然后让读者启动 `pi` 执行 `/login`，至少完成一个供应商；作者用到 `openai-codex`、`anthropic`、`xai`、`deepseek`、`kimi-coding`。web-search 的默认搜索用 `anthropic` 与 `openai-codex` 的登录，登了哪家就只搜哪家。
 
 **完成标准**：`pi list` 列出 firecode；`pi --list-models` 至少一个模型；`ls ~/.agents/skills/development/architecture-wiki/SKILL.md` 存在。
 
@@ -122,18 +122,17 @@ brew install --cask helium-browser
 
 ## 步骤 8：凭据（人工关口）
 
-密钥写进 `~/.config/my-agent-workstation/env.zsh`（`chmod 600`，步骤 5 的片段会 source 它）：
+web-search 的 `--quick` 与 `fetch` 走 TinyFish，密钥写进 `~/.config/my-agent-workstation/env.zsh`（`chmod 600`，步骤 5 的片段会 source 它）：
 
 ```zsh
-export BRAVE_SEARCH_API_KEY='<brave-key>'
-export EXA_API_KEY='<exa-key>'
+export TINYFISH_API_KEY='<tinyfish-key>'
 ```
 
-Context7：`npx ctx7 login`，浏览器里完成 OAuth。
+密钥只进新开的 shell：已开的 Herdr 窗格和其中的 pi 拿不到，新开窗格再启动 pi。
 
 Bark 推送地址写入 `~/.pi/agent/bark-key` 并 `chmod 600`，格式 `https://api.day.app/<key>/`（结尾带斜杠）。不用 Bark 就跳过，FireCode 检测不到文件即停用。
 
-**完成标准**：新 shell 里 `echo $BRAVE_SEARCH_API_KEY` 非空；`ls -l ~/.pi/agent/bark-key` 为 `-rw-------`。
+**完成标准**：新 shell 里 `echo $TINYFISH_API_KEY` 非空；`ls -l ~/.pi/agent/bark-key` 为 `-rw-------`。
 
 ## 落点清单
 
