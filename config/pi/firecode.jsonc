@@ -39,19 +39,19 @@
 	// 模型必须是内置 provider（扩展注册的如 antigravity 在观察子会话里解析不到）。
 	"watcher": {
 		"enabled": false,
-		"model": "openai-codex/gpt-5.6-sol/medium",
+		"model": "openai-codex/gpt-6-sol/medium",
 		"context": "minimal"
 	},
 
 	"master": {
 		"roles": {
 			"调研员": {
-				"model": "anthropic/claude-sonnet-5/medium",
+				"model": "openai-codex/gpt-6-luna/medium",
 				"use": "大量搜索、读日志、找线索；不实现",
-				"fallback": ["openai-codex/gpt-5.6-luna/high"]
+				"fallback": ["anthropic/claude-sonnet-5/medium"]
 			},
 			"工程师": {
-				"model": "anthropic/claude-opus-5/medium",
+				"model": "anthropic/claude-opus-5-5/medium",
 				"use": "实现、调试",
 				"fallback": [
 					"openai-codex/gpt-6-astra/low",
@@ -59,14 +59,14 @@
 				]
 			},
 			"设计师": {
-				"model": "anthropic/claude-opus-5/medium",
+				"model": "anthropic/claude-opus-5-5/medium",
 				"use": "视觉、前端",
 				"fallback": ["openai-codex/gpt-6-astra/low"]
 			},
 			"哨兵": {
-				"model": "anthropic/claude-sonnet-5/low",
+				"model": "openai-codex/gpt-6-luna/low",
 				"use": "CI、部署、长测试等待",
-				"fallback": ["openai-codex/gpt-5.6-luna/low"]
+				"fallback": ["anthropic/claude-sonnet-5/low"]
 			}
 		}
 	},
@@ -74,12 +74,12 @@
 	// 预设：一键切换模型原子+工具+附加指令的组合，按 key 或 /preset 名字切。
 	// 字段都可选：model（原子）/ tools / instructions / key；没写 key 只能 /preset。
 	"presets": {
-		"fable": { "model": "anthropic/claude-fable-5-1/medium", "key": "alt+1" },
-		"opus5": { "model": "anthropic/claude-opus-5/medium", "key": "alt+2" },
+		"opus": { "model": "anthropic/claude-opus-5-5/medium", "key": "alt+1" },
+		"fable": { "model": "anthropic/claude-fable-5-1/medium", "key": "alt+2" },
 		"astra": { "model": "openai-codex/gpt-6-astra/medium", "key": "alt+3" },
-		"ds": { "model": "deepseek/deepseek-flash/high", "key": "alt+4" },
-		"sol": { "model": "openai-codex/gpt-5.6-sol/medium", "key": "alt+5" },
-		"xai": { "model": "xai/grok-4.6/high", "key": "alt+6" }
+		"sol": { "model": "openai-codex/gpt-6-sol/medium", "key": "alt+4" },
+		"ds": { "model": "deepseek/deepseek-flash/high", "key": "alt+5" },
+		"xai": { "model": "xai/grok-4.7/high", "key": "alt+6" }
 	},
 
 	// /fire-review 对抗性审查：几个审查模型并行挑毛病，全部说过才算过；
@@ -92,7 +92,10 @@
 	// 本节字段必须齐全；拼错字段名会直接报配置错误而不是静默忽略。
 	"review": {
 		"advisor": "anthropic/claude-fable-5-1/medium",
-		"reviewers": ["anthropic/claude-opus-5/medium"],
+		"reviewers": [
+			"anthropic/claude-opus-5-5/low",
+			"openai-codex/gpt-6-sol/low"
+		],
 		"maxRounds": 5,
 		"advisorAfterFailures": 2,
 		"timeoutMinutes": 40,
