@@ -1,35 +1,39 @@
 {
-	"lastChangelogVersion": "0.87.1",
-	"defaultProvider": "anthropic",
-	"defaultModel": "claude-opus-5-5",
-	"defaultThinkingLevel": "medium",
-	"theme": "light/midnight-rose",
-	"extensions": ["!extensions/*.test.ts", "!tps.ts"],
-	"quietStartup": true,
-	"defaultProjectTrust": "always",
-	"enabledModels": [
-		"openai-codex/gpt-6-sol",
-		"openai-codex/gpt-6-luna",
-		"anthropic/claude-fable-5-1",
-		"anthropic/claude-sonnet-5",
-		"anthropic/claude-opus-5-5",
-		"anthropic/claude-opus-4-6",
-		"xai/grok-4.7",
-		"deepseek/deepseek-flash"
-	],
-	"hideThinkingBlock": true,
-	"showCacheMissNotices": true,
-	"warnings": {
-		"anthropicExtraUsage": false
-	},
-	"compaction": {
-		"enabled": true,
-		"reserveTokens": 36000
-	},
-	"terminal": {
-		"showTerminalProgress": true
-	},
-	"treeFilterMode": "no-tools",
-	"tuiMode": "regular",
-	"fullscreenExitOutput": "transcript"
+  "lastChangelogVersion": "0.87.1",
+  "defaultProvider": "anthropic",
+  "defaultModel": "claude-opus-5-5",
+  "defaultThinkingLevel": "medium",
+  "theme": "light/midnight-rose",
+  "extensions": [
+    "!extensions/*.test.ts",
+    "!tps.ts"
+  ],
+  "quietStartup": true,
+  "defaultProjectTrust": "always",
+  "enabledModels": [
+    "openai-codex/gpt-6-sol",
+    "openai-codex/gpt-6-luna",
+    "openai-codex/gpt-6-astra",
+    "anthropic/claude-fable-5-1",
+    "anthropic/claude-sonnet-5",
+    "anthropic/claude-opus-5-5",
+    "anthropic/claude-opus-4-6",
+    "xai/grok-4.7",
+    "deepseek/deepseek-flash"
+  ],
+  "hideThinkingBlock": true,
+  "showCacheMissNotices": true,
+  "warnings": {
+    "anthropicExtraUsage": false
+  },
+  "compaction": {
+    "enabled": true,
+    "reserveTokens": 36000
+  },
+  "terminal": {
+    "showTerminalProgress": true
+  },
+  "treeFilterMode": "no-tools",
+  "tuiMode": "regular",
+  "fullscreenExitOutput": "transcript"
 }
