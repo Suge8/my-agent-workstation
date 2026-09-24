@@ -11,9 +11,10 @@ delivery = "system"
 
 # $session 是 Pi 集成实时上报的会话名，Ctrl+R 改名后侧边栏立刻跟着变；默认行模板里没有它。
 # rows_by_agent 整行替换而非追加，所以 state_icon/workspace/agent 都得写全。
-# $session 默认是 overlay 灰 + 弱化，改成 one-dark 主文本色 + 加粗，与工作区名同档。
+# $session 默认是 overlay 灰 + 弱化；只取消弱化并加粗。fg 只收十六进制、引用不了主题色，
+# 写死会在 auto_switch 切到另一套明暗主题时失去对比度，所以沿用主题的 overlay 色。
 [ui.sidebar.agents.rows_by_agent]
-pi = [["state_icon", "workspace", { token = "$session", fg = "#abb2bf", bold = true, dim = false }], ["agent"]]
+pi = [["state_icon", "workspace", { token = "$session", bold = true, dim = false }], ["agent"]]
 
 [theme]
 name = "one-dark"
