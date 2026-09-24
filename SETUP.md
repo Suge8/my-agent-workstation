@@ -100,11 +100,12 @@ Ghostty 的 `macos-option-as-alt = true` 是步骤 4 alt 预设键的前提；CJ
 ## 步骤 6：桌面控制 BCU（人工关口）
 
 ```bash
-npm install --global github:Suge8/better-computer-use
-ln -s "$(npm root -g)/better-computer-use/skills/better-computer-use" ~/.agents/skills/operations/better-computer-use
+git clone https://github.com/Suge8/better-computer-use ~/Project/better-computer-use
+cd ~/Project/better-computer-use && npm install && npm link
+ln -s ~/Project/better-computer-use/skills/better-computer-use ~/.agents/skills/operations/better-computer-use
 ```
 
-第一条装 `bcu` 命令，第二条把同一份包里的 skill 接进共用目录。helper app 在首次运行命令时自动安装。然后转达读者：终端运行 `bcu setup`，在「系统设置 → 隐私与安全性」给 `bcu.app` 勾选**辅助功能**和**屏幕录制**，回终端按回车完成校验。
+前两条克隆、构建并把 `bcu` 命令接到全局，第三条把同一仓库里的 skill 接进共用目录。npm 提示 esbuild 的 install-scripts 未批准可以忽略，构建不依赖它。helper app 在首次运行命令时自动安装。然后转达读者：终端运行 `bcu setup`，在「系统设置 → 隐私与安全性」给 `bcu.app` 勾选**辅助功能**和**屏幕录制**，回终端按回车完成校验。
 
 **完成标准**：`bcu doctor` 裸退出码为 0。
 
@@ -140,9 +141,9 @@ Bark 推送地址写入 `~/.pi/agent/bark-key` 并 `chmod 600`，格式 `https:/
 
 | 装了什么 | 落点 | 对已有文件的改动 |
 | --- | --- | --- |
-| 全局 npm | `pi`、`cloakbrowser`、`better-computer-use`（来自 GitHub） | 新增 |
+| 全局 npm | `pi`、`cloakbrowser`；`bcu`（`npm link` 指向克隆） | 新增 |
 | Herdr | `command -v herdr`、`~/.config/herdr/`（配置、插件、会话状态）；`herdr integration install pi` 写入 Pi 配置目录 | 新增 |
-| Skills | `~/.agents/skills`（clone）、`~/Project/architecture-wiki`（clone）、两个 symlink | 新增 |
+| Skills 与 BCU | `~/.agents/skills`、`~/Project/architecture-wiki`、`~/Project/better-computer-use`（均为 clone）、两个 skill symlink | 新增 |
 | Pi package | `settings.json` 的 `packages`：firecode | 新增 |
 | Pi 配置 | `~/.pi/agent/` 下 `settings.json`、`keybindings.json`、`models.json` | 合并 |
 | Pi 配置 | `~/.pi/agent/SYSTEM.md`、`themes/midnight-rose.json`、`extensions/firecode/config.jsonc` | 整体写入，原件留底 |
