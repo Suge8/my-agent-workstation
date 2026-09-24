@@ -46,9 +46,9 @@
 	"master": {
 		"roles": {
 			"调研员": {
-				"model": "openai-codex/gpt-6-luna/medium",
+				"model": "anthropic/claude-sonnet-5/medium",
 				"use": "大量搜索、读日志、找线索；不实现",
-				"fallback": ["anthropic/claude-sonnet-5/medium"]
+				"fallback": ["openai-codex/gpt-6-luna/medium"]
 			},
 			"工程师": {
 				"model": "anthropic/claude-opus-5-5/medium",
@@ -61,7 +61,10 @@
 			"设计师": {
 				"model": "anthropic/claude-opus-5-5/medium",
 				"use": "视觉、前端",
-				"fallback": ["openai-codex/gpt-6-astra/low"]
+				"fallback": [
+					"anthropic/claude-fable-5-1/low",
+					"openai-codex/gpt-6-astra/low"
+				]
 			},
 			"哨兵": {
 				"model": "openai-codex/gpt-6-luna/low",
