@@ -1,4 +1,7 @@
 # 由 ~/.zshrc 末尾 source。密钥放 ~/.config/my-agent-workstation/env.zsh，不入库。
+# UU 远程的 tmux 以 umask 000 运行，从它启动的 shell 和 Herdr 会继承，新文件变成人人可写，
+# launchd、ssh 这类检查权限的工具随之拒绝加载；这里恢复 macOS 默认值。
+umask 022
 export PI_CACHE_RETENTION=long
 [[ -r "$HOME/.config/my-agent-workstation/env.zsh" ]] && source "$HOME/.config/my-agent-workstation/env.zsh"
 
