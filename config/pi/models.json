@@ -38,6 +38,46 @@
           "contextWindow": 1050000
         }
       }
+    },
+    "anthropic": {
+      "modelOverrides": {
+        "claude-opus-5-5": {
+          "inputLimits": {
+            "images": {
+              "resize": {
+                "maxBytes": 524288
+              }
+            }
+          }
+        },
+        "claude-sonnet-5": {
+          "inputLimits": {
+            "images": {
+              "resize": {
+                "maxBytes": 524288
+              }
+            }
+          }
+        },
+        "claude-fable-5-1": {
+          "inputLimits": {
+            "images": {
+              "resize": {
+                "maxBytes": 524288
+              }
+            }
+          }
+        },
+        "claude-opus-4-6": {
+          "inputLimits": {
+            "images": {
+              "resize": {
+                "maxBytes": 524288
+              }
+            }
+          }
+        }
+      }
     }
   }
 }
