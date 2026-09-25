@@ -39,14 +39,14 @@ herdr plugin install -y smarzban/herdr-file-viewer
 | `keybindings.json` | `~/.pi/agent/keybindings.json` | 合并 |
 | `models.json` | `~/.pi/agent/models.json` | 合并 |
 | `SYSTEM.md` | `~/.pi/agent/SYSTEM.md` | 整体替换 |
-| `themes/midnight-rose.json` | `~/.pi/agent/themes/midnight-rose.json` | 复制 |
+| `themes/catppuccin-mocha.json`、`themes/catppuccin-latte.json` | `~/.pi/agent/themes/` | 复制 |
 | `firecode.jsonc` | `~/.pi/agent/extensions/firecode/config.jsonc` | 整体写入 |
 
 转达读者：SYSTEM.md 会把 agent 的语气、验证纪律、改动前对齐习惯换成作者那套，想保留自己的风格就跳过。
 
 `keybindings.json` 里 `tui.input.tab` 是空数组，意图是腾出 Tab 给 thinking 切换，别当无效项删。
 
-**完成标准**：六个文件就位。模型字段留到步骤 4 校正。
+**完成标准**：七个文件就位。模型字段留到步骤 4 校正。
 
 ## 步骤 3：Skills、Pi 扩展与登录（人工关口）
 
@@ -80,7 +80,7 @@ pi install git:github.com/Suge8/firecode
 
 ```bash
 brew install starship fastfetch zsh-autosuggestions zsh-syntax-highlighting
-brew install --cask ghostty font-maple-mono-nf
+brew install --cask ghostty font-maple-mono-nf-cn
 ```
 
 | 文件 | 落点 |
@@ -91,7 +91,7 @@ brew install --cask ghostty font-maple-mono-nf
 | `config/fastfetch/config.jsonc`、`logo.txt` | `~/.config/fastfetch/` |
 | `config/zsh/workstation.zsh` | `~/.config/my-agent-workstation/workstation.zsh` |
 
-Ghostty 的 `macos-option-as-alt = true` 是步骤 4 alt 预设键的前提；CJK 回退字体 OPPO Sans 缺失时 Ghostty 自动跳过。
+Ghostty 的 `macos-option-as-alt = true` 是步骤 4 alt 预设键的前提。Ghostty、Herdr、Pi 统一用 Catppuccin，随系统明暗在 Mocha 与 Latte 间切换；Starship 提示符只用标准字符和终端色名，远程终端缺 Nerd Font 也能正常显示。
 
 向 `~/.zshrc` **末尾追加一行** `source ~/.config/my-agent-workstation/workstation.zsh`，必须在 `compinit` 之后。读者 `.zshrc` 里已有的 autosuggestions / starship / syntax-highlighting / fastfetch 加载语句删掉，避免重复加载。
 
@@ -146,11 +146,11 @@ Bark 推送地址写入 `~/.pi/agent/bark-key` 并 `chmod 600`，格式 `https:/
 | Skills 与 BCU | `~/.agents/skills`、`~/Project/architecture-wiki`、`~/Project/better-computer-use`（均为 clone）、两个 skill symlink | 新增 |
 | Pi package | `settings.json` 的 `packages`：firecode | 新增 |
 | Pi 配置 | `~/.pi/agent/` 下 `settings.json`、`keybindings.json`、`models.json` | 合并 |
-| Pi 配置 | `~/.pi/agent/SYSTEM.md`、`themes/midnight-rose.json`、`extensions/firecode/config.jsonc` | 整体写入，原件留底 |
+| Pi 配置 | `~/.pi/agent/SYSTEM.md`、`themes/catppuccin-*.json`、`extensions/firecode/config.jsonc` | 整体写入，原件留底 |
 | Bark | `~/.pi/agent/bark-key` | 新增 |
 | 终端 | `~/.config/` 下 `ghostty/config`、`ghostty/shaders/cursor.frag`、`starship.toml`、`fastfetch/` | 整体写入 |
 | zsh | `~/.config/my-agent-workstation/workstation.zsh`、`env.zsh` | 新增 |
 | zsh 入口 | `~/.zshrc` | 末尾追加一行 source，原件留底 |
-| Homebrew | ghostty、font-maple-mono-nf、helium-browser；starship、fastfetch、zsh-autosuggestions、zsh-syntax-highlighting、agent-browser | 新增 |
+| Homebrew | ghostty、font-maple-mono-nf-cn、helium-browser；starship、fastfetch、zsh-autosuggestions、zsh-syntax-highlighting、agent-browser | 新增 |
 | BCU helper | `/Applications/bcu.app`（或 `~/Applications/bcu.app`）及两项授权 | 新增 |
 | 隔离浏览器 | cloakbrowser 自管目录、`/Applications/Helium.app` | 新增 |

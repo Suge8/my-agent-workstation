@@ -3,7 +3,7 @@
   "defaultProvider": "anthropic",
   "defaultModel": "claude-opus-5-5",
   "defaultThinkingLevel": "medium",
-  "theme": "light/midnight-rose",
+  "theme": "catppuccin-latte/catppuccin-mocha",
   "extensions": [
     "!extensions/*.test.ts",
     "!tps.ts"

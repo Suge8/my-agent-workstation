@@ -17,10 +17,9 @@ delivery = "system"
 pi = [["state_icon", "workspace", { token = "$session", bold = true, dim = false }], ["agent"]]
 
 [theme]
-name = "one-dark"
+# auto_switch 按内置配对在 catppuccin（Mocha）与 catppuccin-latte 间切换，与 Ghostty、Pi 同一套
+name = "catppuccin"
 auto_switch = true
-dark_name = "one-dark"
-light_name = "one-light"
 
 [keys]
 # Ctrl+1..9 直达第 N 个 agent，Ctrl+Shift+1..9 直达第 N 个工作区（Pi 的 preset 用 Alt+1..9，两边错开不冲突）

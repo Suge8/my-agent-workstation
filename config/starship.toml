@@ -1,136 +1,31 @@
 "$schema" = "https://starship.rs/config-schema.json"
 
-format = """
-[](#9A348E)\
-$os\
-$username\
-[](bg:#DA627D fg:#9A348E)\
-$directory\
-[](fg:#DA627D bg:#FCA17D)\
-$git_branch\
-$git_status\
-[](fg:#FCA17D bg:#86BBD8)\
-$c\
-$elixir\
-$elm\
-$golang\
-$gradle\
-$haskell\
-$java\
-$julia\
-$nodejs\
-$nim\
-$rust\
-$scala\
-[](fg:#86BBD8 bg:#06969A)\
-$docker_context\
-[](fg:#06969A bg:#33658A)\
-[ ♥ ](bg:#33658A)\
-[ ](fg:#33658A)\
-"""
+# 只用标准 Unicode 字符和 ANSI 色名：UU 远程等没有 Nerd Font 的终端不出方框，
+# 颜色取自终端调色板，随 Ghostty 的 Catppuccin 明暗切换。
+format = "$username$hostname$directory$git_branch$git_state$git_status$cmd_duration$character"
 
+# username 与 hostname 默认只在 SSH 或 root 下出现
 [username]
-show_always = true
-style_user = "bg:#9A348E"
-style_root = "bg:#9A348E"
-format = "[$user ]($style)"
-disabled = false
+style_user = "yellow"
+format = "[$user]($style)@"
 
-[os]
-style = "bg:#9A348E"
-disabled = false
-format = "[$symbol ]($style)"
-
-[os.symbols]
-Macos = ""
+[hostname]
+ssh_symbol = ""
+style = "yellow"
+format = "[$hostname]($style) "
 
 [directory]
-style = "bg:#DA627D"
-format = "[ $path ]($style)"
-truncation_length = 0
-truncate_to_repo = false
-truncation_symbol = ""
-
-[directory.substitutions]
-"Documents" = "󰈙 "
-"Downloads" = " "
-"Music" = " "
-"Pictures" = " "
-
-[c]
-symbol = " "
-style = "bg:#86BBD8"
-format = "[ $symbol ($version) ]($style)"
-
-[cpp]
-symbol = " "
-style = "bg:#86BBD8"
-format = "[ $symbol ($version) ]($style)"
-
-[docker_context]
-symbol = " "
-style = "bg:#06969A"
-format = "[ $symbol $context ]($style)"
-
-[elixir]
-symbol = " "
-style = "bg:#86BBD8"
-format = "[ $symbol ($version) ]($style)"
-
-[elm]
-symbol = " "
-style = "bg:#86BBD8"
-format = "[ $symbol ($version) ]($style)"
-
-[golang]
-symbol = " "
-style = "bg:#86BBD8"
-format = "[ $symbol ($version) ]($style)"
-
-[gradle]
-style = "bg:#86BBD8"
-format = "[ $symbol ($version) ]($style)"
-
-[haskell]
-symbol = " "
-style = "bg:#86BBD8"
-format = "[ $symbol ($version) ]($style)"
-
-[java]
-symbol = " "
-style = "bg:#86BBD8"
-format = "[ $symbol ($version) ]($style)"
-
-[julia]
-symbol = " "
-style = "bg:#86BBD8"
-format = "[ $symbol ($version) ]($style)"
-
-[nodejs]
-symbol = ""
-style = "bg:#86BBD8"
-format = "[ $symbol ($version) ]($style)"
-
-[nim]
-symbol = "󰆥 "
-style = "bg:#86BBD8"
-format = "[ $symbol ($version) ]($style)"
-
-[rust]
-symbol = ""
-style = "bg:#86BBD8"
-format = "[ $symbol ($version) ]($style)"
-
-[scala]
-symbol = " "
-style = "bg:#86BBD8"
-format = "[ $symbol ($version) ]($style)"
+style = "blue"
+read_only = " ro"
 
 [git_branch]
-symbol = ""
-style = "bg:#FCA17D"
-format = "[ $symbol $branch ]($style)"
+symbol = ""
+style = "purple"
+format = "[$branch]($style) "
 
 [git_status]
-style = "bg:#FCA17D"
-format = "[$all_status$ahead_behind ]($style)"
+style = "red"
+
+[cmd_duration]
+style = "yellow"
+format = "[$duration]($style) "
